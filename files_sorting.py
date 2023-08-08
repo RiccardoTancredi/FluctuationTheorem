@@ -34,21 +34,21 @@ class Txt_Reading:
         # take account only of rows with f = 100 kHz
         self.file = self.file[1:][np.diff(self.file[:, 0]) == 1, :]
 
-        self.λ = self.file[:, -1] if ty == 'u' else self.file[:, -1][::-1]
+        self.λ_original = self.file[:, -1] if ty == 'u' else self.file[:, -1][::-1]
         self.force_Y = np.abs(self.file[:, 2]) if ty == 'u' else np.abs(self.file[:, 2][::-1])
         self.time = self.file[:, -3]
         self.time -= self.time[0] # start from t = 0 s
 
         # Correction just to preserve the next part of the analysis if for any chance
         # the x-axis is shifted back, into negatives numbers
-        if np.min(self.λ) < 0:
-            self.λ = self.λ - np.min(self.λ) + 200  ## ??
+        # Normalization
+        self.λ = (self.λ_original - np.min(self.λ_original))/(np.max(self.λ_original)-np.min(self.λ_original))
 
-        if np.max(self.λ) < 1000:
+        try:
             self.analysis(print_out, graph)
-        else:
+        except:
             self.params = np.zeros(10) # 10 = number of parameters
-            self.index, self.λ_0, self.f_rupture, self.t_0 = [None]*4
+            self.index, self.λ_0, self.f_rupture, self.t_0 = [[0]]*4
 
         columns = ["f_rupture", "f_rupture_next", "x_ssDNA", "N_nucleotides", "t_0", "λ_0", "a_pre", "b_pre", "a_post", "b_post"]
         self.params_df = pd.DataFrame([self.params], columns=columns)
@@ -60,11 +60,17 @@ class Txt_Reading:
         self.λ_0 = self.λ[self.index].tolist()
         self.f_rupture = self.force_Y[self.index].tolist()
 
-        if self.f_rupture[0] > 7 or self.f_rupture[0] < 2.9: 
+        if self.f_rupture[0] > 7 or self.f_rupture[0] < 3: 
             if print_out:
                 print(f'The break point λ_0 {self.λ_0} could be smaller/higher than expected')
                 print(f'or the rupture force {self.f_rupture} smaller/higher than expected')
             self.λ_0, self.index, self.f_rupture = self.change_point(print_out)
+
+        if self.index[0] < 5:
+            # it's impossible to perform a fit: return 0
+            self.params = np.zeros(10) # 10 = number of parameters
+            self.index, self.λ_0, self.f_rupture, self.t_0 = [[0]]*4
+            return -1
 
         self.f_rupture_next = self.force_Y[self.index + 1].tolist()
         # new fits, with λ_0 position fixed
@@ -75,7 +81,7 @@ class Txt_Reading:
         post_f = self.force_Y[self.index[0]:]
         popt_post, _ = curve_fit(lambda x, a, b: x*a+b, post_λ, post_f)
         self.t_0 = self.time[self.index].tolist()
-        self.k_eff = popt_pre[0] # np.abs((self.f_rupture - self.force_Y[0])/(self.λ_0 - self.λ[0]))
+        self.k_eff = popt_pre[0]/(np.max(self.λ_original)-np.min(self.λ_original)) # np.abs((self.f_rupture - self.force_Y[0])/(self.λ_0 - self.λ[0]))
         self.x_ssDNA = np.array([np.abs(self.f_rupture[0]-self.f_rupture_next[0])/self.k_eff + self._calculation_x_d(self.f_rupture[0])]).tolist()
         self.N_nucleotides = np.array([self.x_ssDNA[0] / (self.x_WLC_f(self.f_rupture[0]) * self.d_aa)]).tolist()
 
@@ -116,8 +122,8 @@ class Txt_Reading:
             λ_0 = self.λ[index]
             f_rupture = self.force_Y[index]
 
-            if 2.9 < f_rupture[0] < 7: 
-                # if any (or) improvement
+            if 3 < f_rupture[0] < 7: 
+                # if any improvement
                 if print_out:
                     print(f'Reshape of {n_points} performed')
                 return λ_0.tolist(), index, f_rupture.tolist()
@@ -139,19 +145,21 @@ class Txt_Reading:
             unfold_N_max = max([int(f.split("_u.txt")[0]) for f in all_files if "_u.txt" in f])
             for N in range(1, fold_N_max+1):
                 file_f = self.readTxt(number = m, N = N, ty = 'f', print_out=False)
-                if 1.5 < self.params[0] < 9.2 and 10 < self.N_nucleotides[0] < 110:
+                if 1.5 < self.f_rupture[0] < 9.2 and 10 < self.N_nucleotides[0] < 110 and self.λ_0[0] < 0.8:
                     m_f.append([self.params[:5]]) # saving the parameters
                 else:
                     print(f'Not saving file {self.path}')
             for N in range(1, unfold_N_max+1):
                 file_u = self.readTxt(number = m, N = N, ty = 'u', print_out=False)
-                if 1.5 < self.params[0] < 9.2 and 10 < self.N_nucleotides[0] < 110:
+                if 1.5 < self.f_rupture[0] < 9.2 and 4 < self.N_nucleotides[0] < 110 and self.λ_0[0] < 0.8:
                     m_u.append([self.params[:5]]) # saving the parameters 
                 else:
                     print(f'Not saving file {self.path}')
 
             all_molecules_f.append(m_f)
             all_molecules_u.append(m_u)
+
+        self._save_results(molecules, all_molecules_f, all_molecules_u)
 
         return molecules, all_molecules_f, all_molecules_u
 
@@ -209,6 +217,34 @@ class Txt_Reading:
             for j, el in enumerate(wh_F):
                 ind = 0 if j == 0 else wh_F[j-1]
                 np.savetxt(save_dir + f'{j+1}_f.txt', folding[ind:el])
+
+
+    def _save_results(self, molecules, all_molecules_f, all_molecules_u):
+        # Columns: Molecule, f, f_next, x_ssDNA, N_nucleotides, t_0
+        self.res_fold = pd.DataFrame(columns=["Molecule", "f", "f_next", "x_ssDNA", "N_nucleotides", "t_0"])
+        self.res_unfold = pd.DataFrame(columns=["Molecule", "f", "f_next", "x_ssDNA", "N_nucleotides", "t_0"])
+        j = 0
+        for m in range(len(molecules)):
+            for i in range(len(all_molecules_f[m])):
+                self.res_fold.loc[i+j] = [molecules[m]]+all_molecules_f[m][i][0]
+            j += len(all_molecules_f[m])
+
+        j = 0
+        for m in range(len(molecules)):
+            for i in range(len(all_molecules_u[m])):
+                self.res_unfold.loc[i+j] = [molecules[m]]+all_molecules_u[m][i][0]
+            j += len(all_molecules_f[m])
+
+        results_folder = f'res/{self.folder}'
+        if not os.path.exists(results_folder):
+            os.makedirs(results_folder) # create folder
+    
+        result_path_folding = f'res/{self.folder}/f_max{self.f_MAX}_folding.txt'
+        result_path_unfolding = f'res/{self.folder}/f_max{self.f_MAX}_unfolding.txt'
+
+        print("Saving results...") # create files
+        np.savetxt(result_path_folding, self.res_fold.values)
+        np.savetxt(result_path_unfolding, self.res_unfold.values)
 
     def _heviside_fitting(self, x, λ_0, a, b, c, d):
         return (x*a + b) * np.heaviside(λ_0 - x, 0.5) + (c*x + d) * np.heaviside(x - λ_0, 0.5) 
