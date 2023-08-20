@@ -25,7 +25,7 @@ class Txt_Reading:
         
 
     
-    def readTxt(self, number = 1, N = 1, ty = 'u', print_out=True, graph = False):
+    def readTxt(self, number = 1, N = 1, ty = 'u', print_out=True, graph = False, initial_t_time=False):
         self.number = number    # molecule number
         self.path = f'{self.working_dir}/{self.number}/{N}_{ty}.txt'
 
@@ -36,8 +36,9 @@ class Txt_Reading:
 
         self.λ_original = self.file[:, -1] if ty == 'u' else self.file[:, -1][::-1]
         self.force_Y = np.abs(self.file[:, 2]) if ty == 'u' else np.abs(self.file[:, 2][::-1])
-        self.time = self.file[:, -3]
-        self.time -= self.time[0] # start from t = 0 s
+        self.time = self.file[:, -3] if ty == 'u' else self.file[:, -3][::-1]
+        t_initial = self._set_initial_time(ty) if initial_t_time else (self.time[0] if ty == 'u' else self.time[-1])
+        self.time -= t_initial # different initial time for each file, unique for each molecule
 
         # Correction just to preserve the next part of the analysis if for any chance
         # the x-axis is shifted back, into negatives numbers
@@ -60,7 +61,7 @@ class Txt_Reading:
         self.λ_0 = self.λ[self.index].tolist()
         self.f_rupture = self.force_Y[self.index].tolist()
 
-        if self.f_rupture[0] > 7 or self.f_rupture[0] < 3: 
+        if self.f_rupture[0] > 8.2 or self.f_rupture[0] < 2.8: 
             if print_out:
                 print(f'The break point λ_0 {self.λ_0} could be smaller/higher than expected')
                 print(f'or the rupture force {self.f_rupture} smaller/higher than expected')
@@ -91,6 +92,8 @@ class Txt_Reading:
         if graph:
             plt.plot(self.λ, self.force_Y, label = 'Data')
             plt.plot(self.λ, theor_f, label = 'Fit')
+            plt.xlabel('$\lambda \\: [nm]$')
+            plt.ylabel('$f_Y \\: [pN]$')
             plt.grid()
             plt.legend()
             plt.title(f'{self.path}')
@@ -122,7 +125,7 @@ class Txt_Reading:
             λ_0 = self.λ[index]
             f_rupture = self.force_Y[index]
 
-            if 3 < f_rupture[0] < 7: 
+            if 2.8 < f_rupture[0] < 8.2: 
                 # if any improvement
                 if print_out:
                     print(f'Reshape of {n_points} performed')
@@ -144,13 +147,13 @@ class Txt_Reading:
             fold_N_max = max([int(f.split("_f.txt")[0]) for f in all_files if "_f.txt" in f])
             unfold_N_max = max([int(f.split("_u.txt")[0]) for f in all_files if "_u.txt" in f])
             for N in range(1, fold_N_max+1):
-                file_f = self.readTxt(number = m, N = N, ty = 'f', print_out=False)
+                file_f = self.readTxt(number = m, N = N, ty = 'f', print_out=False, initial_t_time=True)
                 if 1.5 < self.f_rupture[0] < 9.2 and 10 < self.N_nucleotides[0] < 110 and self.λ_0[0] < 0.8:
                     m_f.append([self.params[:5]]) # saving the parameters
                 else:
                     print(f'Not saving file {self.path}')
             for N in range(1, unfold_N_max+1):
-                file_u = self.readTxt(number = m, N = N, ty = 'u', print_out=False)
+                file_u = self.readTxt(number = m, N = N, ty = 'u', print_out=False, initial_t_time=True)
                 if 1.5 < self.f_rupture[0] < 9.2 and 4 < self.N_nucleotides[0] < 110 and self.λ_0[0] < 0.8:
                     m_u.append([self.params[:5]]) # saving the parameters 
                 else:
@@ -246,12 +249,26 @@ class Txt_Reading:
         np.savetxt(result_path_folding, self.res_fold.values)
         np.savetxt(result_path_unfolding, self.res_unfold.values)
 
+  
     def _heviside_fitting(self, x, λ_0, a, b, c, d):
         return (x*a + b) * np.heaviside(λ_0 - x, 0.5) + (c*x + d) * np.heaviside(x - λ_0, 0.5) 
     
     def _calculation_x_d(self, f):
         return self.d*(1./np.tanh((f*self.d)/self.KBT) - self.KBT/(f*self.d)) # nm
     
+  
+    def _set_initial_time(self, ty):
+        # check if there a meta-file:
+        self.metafile_path = f'{self.working_dir}/{self.number}/meta_t0.txt'
+        if os.path.isfile(self.metafile_path):
+            # the file exists
+            t_0 = np.loadtxt(self.metafile_path)
+        else:
+            # create the file
+            t_0 = self.time[0] if ty == 'u' else self.time[-1]  # start from t = 0 s
+            np.savetxt(self.metafile_path, np.array([t_0]), header=f'Molecule: {self.number}')
+        return t_0
+
     # Inverse function of f(x) from WLC model
     def x_WLC_f(self, f):
         fnorm = ((4*self.P)/self.KBT)*f

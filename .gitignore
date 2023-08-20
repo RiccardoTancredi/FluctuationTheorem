@@ -3,3 +3,5 @@
 *.txt
 prova.ipynb
 *.png
+file_hopping.py
+remove_t0.py
