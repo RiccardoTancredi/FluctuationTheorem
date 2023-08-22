@@ -134,7 +134,7 @@ class Txt_Reading:
         return self.λ_0, self.index, self.f_rupture
     
 
-    def sequential_analysis(self):
+    def sequential_analysis(self, print_not_saved=True, save_files=True):
         molecules = sorted([int(m) for m in os.listdir(self.working_dir)])  # molecule numbers
         # Each molecule has different folding and unfolding cycles
         all_molecules_f = []
@@ -151,18 +151,21 @@ class Txt_Reading:
                 if 1.5 < self.f_rupture[0] < 9.2 and 10 < self.N_nucleotides[0] < 110 and self.λ_0[0] < 0.8:
                     m_f.append([self.params[:5]]) # saving the parameters
                 else:
-                    print(f'Not saving file {self.path}')
+                    if print_not_saved:
+                        print(f'Not saving file {self.path}')
             for N in range(1, unfold_N_max+1):
                 file_u = self.readTxt(number = m, N = N, ty = 'u', print_out=False, initial_t_time=True)
                 if 1.5 < self.f_rupture[0] < 9.2 and 4 < self.N_nucleotides[0] < 110 and self.λ_0[0] < 0.8:
                     m_u.append([self.params[:5]]) # saving the parameters 
                 else:
-                    print(f'Not saving file {self.path}')
+                    if print_not_saved:
+                        print(f'Not saving file {self.path}')
 
             all_molecules_f.append(m_f)
             all_molecules_u.append(m_u)
 
-        self._save_results(molecules, all_molecules_f, all_molecules_u)
+        if save_files:
+            self._save_results(molecules, all_molecules_f, all_molecules_u)
 
         return molecules, all_molecules_f, all_molecules_u
 
