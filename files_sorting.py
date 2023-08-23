@@ -25,7 +25,7 @@ class Txt_Reading:
         
 
     
-    def readTxt(self, number = 1, N = 1, ty = 'u', print_out=True, graph = False, initial_t_time=False):
+    def readTxt(self, number = 1, N = 1, ty = 'u', print_out = True, forced_reshaped = 0, graph = False, initial_t_time = False):
         self.number = number    # molecule number
         self.path = f'{self.working_dir}/{self.number}/{N}_{ty}.txt'
 
@@ -46,7 +46,7 @@ class Txt_Reading:
         self.λ = (self.λ_original - np.min(self.λ_original))/(np.max(self.λ_original)-np.min(self.λ_original))
 
         try:
-            self.analysis(print_out, graph)
+            self.analysis(print_out=print_out, forced_reshaped=forced_reshaped, graph=graph)
         except:
             self.params = np.zeros(10) # 10 = number of parameters
             self.index, self.λ_0, self.f_rupture, self.t_0 = [[0]]*4
@@ -56,16 +56,17 @@ class Txt_Reading:
 
         return self.file
     
-    def analysis(self, print_out=True, graph = False):
+    def analysis(self, print_out=True, forced_reshaped=False, graph=False):
         self.index = np.array([np.where(np.diff(self.force_Y) == min(np.diff(self.force_Y)))[0][0]])
         self.λ_0 = self.λ[self.index].tolist()
         self.f_rupture = self.force_Y[self.index].tolist()
-
-        if self.f_rupture[0] > 8.2 or self.f_rupture[0] < 2.8: 
+        self.f_rupture_next = self.force_Y[self.index+1].tolist()
+        if (self.f_rupture[0] > 8.2 or self.f_rupture[0] < 2.8) or (self.f_rupture[0] 
+                                                                    - self.f_rupture_next[0] < 0.1) or forced_reshaped or self.λ_0[0] > 0.51: 
             if print_out:
                 print(f'The break point λ_0 {self.λ_0} could be smaller/higher than expected')
                 print(f'or the rupture force {self.f_rupture} smaller/higher than expected')
-            self.λ_0, self.index, self.f_rupture = self.change_point(print_out)
+            self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped, print_out)
 
         if self.index[0] < 5:
             # it's impossible to perform a fit: return 0
@@ -101,13 +102,13 @@ class Txt_Reading:
 
 
 
-    def change_point(self, print_out=True):
+    def change_point(self, forced_reshaped=0, print_out=True):
         # The aim of this function is to find the best λ_0 is the differrence method doesn't work
         # Attention has to be done since the higher the concentration of oligoneuclites the lower
         # the λ_0 point will be: so the point spotted here could not be the real one
         # Up to now this function just poits out that maybe the point could be a smaller than expected,
         # but doesn't perform any computation
-        segments = [5, 10, 15, 20, 30]
+        segments = [5, 10, 20, 30, 50] if not forced_reshaped else([5] if forced_reshaped == True else [forced_reshaped])
         for n_points in segments: 
             num_segments = len(self.force_Y) // n_points
 
@@ -121,17 +122,30 @@ class Txt_Reading:
 
             # The index of the λ_0 in the λ array is where the difference of consecutive forces has minimum
             # times the scale factor - n_points - used to calculate the average before  
-            index = np.array([np.where(np.diff(force_Y_reshaped) == min(np.diff(force_Y_reshaped)))[0][0]]) * n_points
-            λ_0 = self.λ[index]
-            f_rupture = self.force_Y[index]
+            index = np.array([np.where(np.diff(force_Y_reshaped) == min(np.diff(force_Y_reshaped)))[0][0]]) # * n_points
+            λ_0 = λ_reshaped[index]
+            f_rupture, f_rupture_next = force_Y_reshaped[int(index):int(index+2)]
 
-            if 2.8 < f_rupture[0] < 8.2: 
+            if forced_reshaped:
+                print(f'Reshape of {n_points} performed')
+                self.force_Y = force_Y_reshaped.copy()
+                self.λ = λ_reshaped.copy()
+                return λ_0.tolist(), index, np.array([f_rupture]).tolist()
+
+            elif 2.8 < f_rupture < 8.2 and f_rupture - f_rupture_next > 0.1: 
+                # work with reshaped data
+                self.force_Y = force_Y_reshaped.copy()
+                self.λ = λ_reshaped.copy()
                 # if any improvement
                 if print_out:
                     print(f'Reshape of {n_points} performed')
-                return λ_0.tolist(), index, f_rupture.tolist()
-        # else, get back the previous result
-        return self.λ_0, self.index, self.f_rupture
+                return λ_0.tolist(), index, np.array([f_rupture]).tolist()
+            else:
+                # perform further reshapes
+                segments.append(n_points + segments[-1])
+                if len(segments) > 10:
+                    # else, get back the initial result found (no reshape at all)
+                    return self.λ_0, self.index, self.f_rupture
     
 
     def sequential_analysis(self, print_not_saved=True, save_files=True):
@@ -148,14 +162,14 @@ class Txt_Reading:
             unfold_N_max = max([int(f.split("_u.txt")[0]) for f in all_files if "_u.txt" in f])
             for N in range(1, fold_N_max+1):
                 file_f = self.readTxt(number = m, N = N, ty = 'f', print_out=False, initial_t_time=True)
-                if 1.5 < self.f_rupture[0] < 9.2 and 10 < self.N_nucleotides[0] < 110 and self.λ_0[0] < 0.8:
+                if 1.5 < self.f_rupture[0] < 9.2 and 30 < self.N_nucleotides[0] < 60 and self.λ_0[0] < 0.8:
                     m_f.append([self.params[:5]]) # saving the parameters
                 else:
                     if print_not_saved:
                         print(f'Not saving file {self.path}')
             for N in range(1, unfold_N_max+1):
                 file_u = self.readTxt(number = m, N = N, ty = 'u', print_out=False, initial_t_time=True)
-                if 1.5 < self.f_rupture[0] < 9.2 and 4 < self.N_nucleotides[0] < 110 and self.λ_0[0] < 0.8:
+                if 1.5 < self.f_rupture[0] < 9.2 and 30 < self.N_nucleotides[0] < 60 and self.λ_0[0] < 0.8:
                     m_u.append([self.params[:5]]) # saving the parameters 
                 else:
                     if print_not_saved:
@@ -274,38 +288,42 @@ class Txt_Reading:
 
     # Inverse function of f(x) from WLC model
     def x_WLC_f(self, f):
+        # y = x/L
+
         fnorm = ((4*self.P)/self.KBT)*f
-        a2 = (1/4)*(-9-fnorm)
-        a1 = (3/2)+(1/2)*fnorm
-        a0 = -fnorm/4
+        a = 4
+        b = -9-fnorm
+        c = 6+2*fnorm
+        d = -fnorm
+
+        p = c/a - (b**2)/(3*a**2)
+        q = d/a - b*c/(3*a**2) + 2*b**3/(27*a**3)
         
-        R = (9*a1*a2-27*a0-2*a2**3)/54.
-        Q = (3*a1-a2**2)/9.
-        
-        D = Q**3+R**2
+        D = (q**2)/4 + (p**3)/27
         
         if D > 0:
             # In this case, there is only one real root, given by "out" below
-            S = np.cbrt(R+np.sqrt(D))
-            T = np.cbrt(R-np.sqrt(D))
-            out = (-1/3)*a2+S+T
+            u = np.cbrt(-q/2+np.sqrt(D))
+            v = np.cbrt(-q/2-np.sqrt(D))
+            out = -b/(3*a)+u+v
         elif D < 0:
             # In this case there 3 real distinct solutions, given by out1,
             # out2, out3 below. The one that interests us is that in the
             # inerval [0,1]. It is seen ("empirically") that is always the
             # second one in the list below [there is perhaps more to search here]
             
-            theta = np.arccos(R/np.sqrt(-Q**3))
-            # out1 = 2*np.sqrt(-Q)*np.cos(theta/3)-(1/3)*a2;
-            out2 = 2*np.sqrt(-Q)*np.cos((theta+2*np.pi)/3)-(1/3)*a2
-            # out3 = 2*np.sqrt(-Q)*np.cos((theta+4*np.pi)/3)-(1/3)*a2
+            rho = np.sqrt((q**2)/4-D)
+            theta = np.arccos(-q/(2*rho))
+            out1 = 2*np.sqrt(-p/3)*np.cos(theta/3)-b/(3*a)
+            out2 = 2*np.sqrt(-p/3)*np.cos((theta+2*np.pi)/3)-b/(3*a)
+            out3 = 2*np.sqrt(-p/3)*np.cos((theta+4*np.pi)/3)-b/(3*a)
             
             # We implement the following check just to be sure out2 is the good root 
             # (in case this "empirical" truth turns out to stop working) 
             try:
                 out2 < 0 or out2 > 1
             except:    
-                print('The default root doesn"t seem the be good one - you may want to check if the others lie in the interval [0,1]')
+                print("The default root doesn't seem to be the good one - you may want to check if the others lie in the interval [0,1]")
             else:
                 out = out2
         else:
@@ -314,9 +332,14 @@ class Txt_Reading:
             # above change again slightly). In practice, however, due to round-off errors,
             # it seems we never hit this boundary but always pass "through" it 
             # This D=0 scenario could still be implemented if needed, though.
-            print('#ToDo')
+            out1 = -2*np.cbrt(q/2)
+            out2 = 2*np.cbrt(q/2)   # = out3
+            if out1 > 0:
+                out = out1
+            else:
+                out = out2
 
-        z = out
+        y = out
         # L = N*d_aa   # nm
 
-        return z    #*self.L   
+        return y    #*self.L   
