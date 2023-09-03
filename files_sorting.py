@@ -12,11 +12,13 @@ class Txt_Reading:
         self.d = 2          # nm
         self.P = 1.35       # ± 0.05 nm -> persistence length
         self.d_aa = 0.58    # ± 0.02 nm/base -> distance between consecutive nucleotides
+        self.loading_rate = 6   # pN/s -> useful to discard useless data. This value can be changed to 5 or 4.5
         self.folder = folder
         # self.dir_name = 'G:/Il mio Drive/Fisica/Dispense Università/2 anno/Zaltron & Xavi/' + dir_name
         self.dir_name = 'F:/Zaltron & Xavi/' + self.folder + '/'
         self.f_MAX = str(f_MAX)
         self.name = f'pull{self.f_MAX}'
+        self.dictionary = {'10':5, '15':6, '20':7, '25':8, '30':8, '35':8}
 
         self.working_dir = f'Data/{self.folder}/{self.f_MAX}'
         if not os.path.exists(self.working_dir):
@@ -37,62 +39,112 @@ class Txt_Reading:
         self.λ_original = self.file[:, -1] if ty == 'u' else self.file[:, -1][::-1]
         self.force_Y = np.abs(self.file[:, 2]) if ty == 'u' else np.abs(self.file[:, 2][::-1])
         self.time = self.file[:, -3] if ty == 'u' else self.file[:, -3][::-1]
-        t_initial = self._set_initial_time(ty) if initial_t_time else (self.time[0] if ty == 'u' else self.time[-1])
-        self.time -= t_initial # different initial time for each file, unique for each molecule
+        self.t_initial = self._set_initial_time(ty) if initial_t_time else (self.time[0] if ty == 'u' else self.time[-1])
+        self.time -= self.t_initial # different initial time for each file, unique for each molecule
 
         # Correction just to preserve the next part of the analysis if for any chance
         # the x-axis is shifted back, into negatives numbers
         # Normalization
         self.λ = (self.λ_original - np.min(self.λ_original))/(np.max(self.λ_original)-np.min(self.λ_original))
 
+        self.fitting_points = 50   # number of points used for linear fits
+        self.N_fits = 0     # Number of fits performed: it can be 0 (no results), 1 (the molecule doesn't open/close), 2 (standard case)
+        self.best, self.linear = [], []
+
+        if not forced_reshaped:
+            # default reshape of 5
+            self.force_Y, self.λ = self.reshape(5)
+
         try:
             self.analysis(print_out=print_out, forced_reshaped=forced_reshaped, graph=graph)
         except:
-            self.params = np.zeros(10) # 10 = number of parameters
-            self.index, self.λ_0, self.f_rupture, self.t_0 = [[0]]*4
+            self._errors()
 
-        columns = ["f_rupture", "f_rupture_next", "x_ssDNA", "N_nucleotides", "t_0", "λ_0", "a_pre", "b_pre", "a_post", "b_post"]
+
+        columns = ["f_rupture", "f_rupture_next", "x_ssDNA", "N_nucleotides", "t_0", "λ_0", "a_pre", "b_pre", "a_post", "b_post", "N_fits"]
         self.params_df = pd.DataFrame([self.params], columns=columns)
 
         return self.file
     
     def analysis(self, print_out=True, forced_reshaped=False, graph=False):
+        if np.abs(self.time[-1] - self.time[0]) < (np.max(self.force_Y) - np.min(self.force_Y)
+                                                   )/self.loading_rate or max(self.force_Y) < int(self.f_MAX
+                                                                                                  ) or min(self.force_Y) > int(self.f_MAX
+                                                                                                                               )/3 or self.λ.size < 50:
+            self._errors()
+            # Noise or other useless data
+            if graph:
+                self.make_plot(save_fig=False, number=self.number, N=self.path.split('_')[0].split('/')[-1], 
+                               ty=self.path.split('.txt')[0][-1], txt=False)
+            return -1
+
         self.index = np.array([np.where(np.diff(self.force_Y) == min(np.diff(self.force_Y)))[0][0]])
+        if self.index[0] < 5:
+            # it's impossible to perform a fit: try changing the index
+            # and see if reshaping the problem solves itself
+            self.index[0] = int(self.λ.size/2)
+        
+
         self.λ_0 = self.λ[self.index].tolist()
         self.f_rupture = self.force_Y[self.index].tolist()
         self.f_rupture_next = self.force_Y[self.index+1].tolist()
-        if (self.f_rupture[0] > 8.2 or self.f_rupture[0] < 2.8) or (self.f_rupture[0] 
-                                                                    - self.f_rupture_next[0] < 0.1) or forced_reshaped or self.λ_0[0] > 0.51: 
+        self.f_rupture_next = self.force_Y[self.index + 1].tolist()
+
+        # new fits, with λ_0 position fixed
+        ind = int(self.index[0])
+        fitting_points = self.fitting_points if ind > self.fitting_points else ind
+        
+        self.popt_pre, self.popt_post = self._compute_fit(ind, fitting_points, self.λ, self.force_Y)
+        self.t_0, self.k_eff, self.x_ssDNA, self.N_nucleotides = self._compute_interesting_variables(self.popt_pre, ind, self.f_rupture, self.f_rupture_next)
+        
+        # We expect N of nucleotides > 30 (if the molecule opens)
+        if (self.f_rupture[0] - self.f_rupture_next[0] < 0.1) or forced_reshaped or self.λ_0[0] > 0.51 or self.λ_0[0] < 0.12 or self.N_nucleotides[0] < 30 or self.N_nucleotides[0] > 60: 
             if print_out:
                 print(f'The break point λ_0 {self.λ_0} could be smaller/higher than expected')
                 print(f'or the rupture force {self.f_rupture} smaller/higher than expected')
             self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped, print_out)
 
-        if self.index[0] < 5:
+
+        if self.linear and not self.best:
             # it's impossible to perform a fit: return 0
-            self.params = np.zeros(10) # 10 = number of parameters
-            self.index, self.λ_0, self.f_rupture, self.t_0 = [[0]]*4
-            return -1
+            # This means that a single linear fit could explain the data
+            # No need to perform a double linear fit
+            self.N_fits = 1
+            self._errors()
+            self.theor_f = self._linear_fit()
 
-        self.f_rupture_next = self.force_Y[self.index + 1].tolist()
-        # new fits, with λ_0 position fixed
-        pre_λ = self.λ[:self.index[0]]
-        pre_f = self.force_Y[:self.index[0]]
-        popt_pre, _ = curve_fit(lambda x, a, b: x*a+b, pre_λ, pre_f)
-        post_λ = self.λ[self.index[0]:]
-        post_f = self.force_Y[self.index[0]:]
-        popt_post, _ = curve_fit(lambda x, a, b: x*a+b, post_λ, post_f)
-        self.t_0 = self.time[self.index].tolist()
-        self.k_eff = popt_pre[0]/(np.max(self.λ_original)-np.min(self.λ_original)) # np.abs((self.f_rupture - self.force_Y[0])/(self.λ_0 - self.λ[0]))
-        self.x_ssDNA = np.array([np.abs(self.f_rupture[0]-self.f_rupture_next[0])/self.k_eff + self._calculation_x_d(self.f_rupture[0])]).tolist()
-        self.N_nucleotides = np.array([self.x_ssDNA[0] / (self.x_WLC_f(self.f_rupture[0]) * self.d_aa)]).tolist()
+        elif (not self.linear and self.best) or (not self.linear and not self.best):
+            self.N_fits = 2
+            if self.best:
+                self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=min(self.best), print_out=print_out)    
+            self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.t_0 + self.λ_0 + self.popt_pre.tolist() + self.popt_post.tolist() + [self.N_fits]
+            self.theor_f = self._heviside_fitting(self.λ, *self.params[5:-1])
 
-        self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.t_0 + self.λ_0 + popt_pre.tolist() + popt_post.tolist()
-        theor_f = self._heviside_fitting(self.λ, *self.params[5:])
+        elif self.linear and self.best:
+            # both linear and double-jump fits had been found
+            # compute χ² to evaluate best result
+            chi_models = np.array([self.chi_squared(mode='linear'), self.chi_squared()])
+            if print_out:
+                print(f'χ² = {chi_models}')
+            wh = np.where(chi_models == min(chi_models))[0]
+            if wh[0] == 0:
+                # linear
+                self.N_fits = 1
+                self._errors()
+                self.theor_f = self._linear_fit()
+            else:
+                # double-jump
+                self.N_fits = 2
+                if self.best:
+                    self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=min(self.best), print_out=print_out)    
+                self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.t_0 + self.λ_0 + self.popt_pre.tolist() + self.popt_post.tolist() + [self.N_fits]
+                self.theor_f = self._heviside_fitting(self.λ, *self.params[5:-1])   
+
 
         if graph:
+            ind = int(self.index[0])
             plt.plot(self.λ, self.force_Y, label = 'Data')
-            plt.plot(self.λ, theor_f, label = 'Fit')
+            plt.plot(self.λ[ind-self.fitting_points:ind+self.fitting_points], self.theor_f[ind-self.fitting_points:ind+self.fitting_points], lw=2.5, label = 'Fit')
             plt.xlabel('$\lambda \\: [nm]$')
             plt.ylabel('$f_Y \\: [pN]$')
             plt.grid()
@@ -101,6 +153,18 @@ class Txt_Reading:
             plt.show()        
 
 
+    def _compute_interesting_variables(self, popt_pre, index, f_rupture, f_rupture_next):
+        # This function compute important variables such as:
+        # t_0: when the jump happens
+        # k_eff: effective k
+        # x_ssDNA: length of the single strand DNA
+        # N_nucleotides: Number of nucleoteotides
+        t_0 = [self.time[index]]
+        k_eff = popt_pre[0]/(np.max(self.λ_original)-np.min(self.λ_original)) 
+        x_ssDNA = np.array([np.abs(f_rupture[0]-f_rupture_next[0])/k_eff + self._calculation_x_d(f_rupture[0])]).tolist()
+        N_nucleotides = np.array([x_ssDNA[0] / (self.x_WLC_f(f_rupture[0]) * self.d_aa)]).tolist()
+        return t_0, k_eff, x_ssDNA, N_nucleotides
+        
 
     def change_point(self, forced_reshaped=0, print_out=True):
         # The aim of this function is to find the best λ_0 is the differrence method doesn't work
@@ -108,7 +172,7 @@ class Txt_Reading:
         # the λ_0 point will be: so the point spotted here could not be the real one
         # Up to now this function just poits out that maybe the point could be a smaller than expected,
         # but doesn't perform any computation
-        segments = [5, 10, 20, 30, 50] if not forced_reshaped else([5] if forced_reshaped == True else [forced_reshaped])
+        segments = list(range(2, self.dictionary[self.f_MAX])) if not forced_reshaped else([1] if forced_reshaped == True else [forced_reshaped])
         for n_points in segments: 
             num_segments = len(self.force_Y) // n_points
 
@@ -123,29 +187,64 @@ class Txt_Reading:
             # The index of the λ_0 in the λ array is where the difference of consecutive forces has minimum
             # times the scale factor - n_points - used to calculate the average before  
             index = np.array([np.where(np.diff(force_Y_reshaped) == min(np.diff(force_Y_reshaped)))[0][0]]) # * n_points
-            λ_0 = λ_reshaped[index]
-            f_rupture, f_rupture_next = force_Y_reshaped[int(index):int(index+2)]
+            ind = int(index[0])
+            λ_0 = λ_reshaped[ind]
+            f_rupture, f_rupture_next = force_Y_reshaped[ind:ind+2]
+            fitting_points = self.fitting_points if ind > self.fitting_points else ind
+            
+            try:
+                popt_pre, popt_post = self._compute_fit(ind, fitting_points, λ_reshaped, force_Y_reshaped)
+                t_0, k_eff, x_ssDNA, N_nucleotides = self._compute_interesting_variables(popt_pre, ind, [f_rupture], [f_rupture_next])
+            except:                    
+                continue
 
             if forced_reshaped:
-                print(f'Reshape of {n_points} performed')
+                if print_out:
+                    print(f'Reshape of {n_points} performed')
                 self.force_Y = force_Y_reshaped.copy()
                 self.λ = λ_reshaped.copy()
-                return λ_0.tolist(), index, np.array([f_rupture]).tolist()
+                self.f_rupture_next = [f_rupture_next]
+                self.fitting_points = fitting_points
+                self.popt_pre, self.popt_post = popt_pre, popt_post
+                self.t_0, self.k_eff, self.x_ssDNA, self.N_nucleotides = t_0, k_eff, x_ssDNA, N_nucleotides
+                self.best, self.linear = [], []
+                return [λ_0], index, [f_rupture]
 
-            elif 2.8 < f_rupture < 8.2 and f_rupture - f_rupture_next > 0.1: 
+            elif (2.8 < f_rupture < 8.2) and (f_rupture - f_rupture_next > 0.1) and (0.12 < λ_0 < 0.51) and (30 < N_nucleotides[0] < 60): 
                 # work with reshaped data
                 self.force_Y = force_Y_reshaped.copy()
                 self.λ = λ_reshaped.copy()
+                self.f_rupture_next = [f_rupture_next]
+                self.fitting_points = fitting_points
+                self.popt_pre, self.popt_post = popt_pre, popt_post
+                self.t_0, self.k_eff, self.x_ssDNA, self.N_nucleotides = t_0, k_eff, x_ssDNA, N_nucleotides
+                self.best, self.linear = [], []
                 # if any improvement
                 if print_out:
-                    print(f'Reshape of {n_points} performed')
-                return λ_0.tolist(), index, np.array([f_rupture]).tolist()
+                    print(f'Reshape of {n_points*5} performed')
+                return [λ_0], index, [f_rupture]
+            
             else:
-                # perform further reshapes
-                segments.append(n_points + segments[-1])
-                if len(segments) > 10:
-                    # else, get back the initial result found (no reshape at all)
-                    return self.λ_0, self.index, self.f_rupture
+                # save the best result found: at least an improvement
+                if (ind < 5 or λ_0 < 0.12 or f_rupture > int(self.f_MAX) or λ_0 < 0.12 or 10 < N_nucleotides[0] < 30):
+                    self.linear.append(n_points)
+                elif 0 < N_nucleotides[0] < self.N_nucleotides[0] and (f_rupture - f_rupture_next > 0.1):
+                    self.best.append(n_points)
+        # else, get back the initial result found (default reshape of 5)
+        return self.λ_0, self.index, self.f_rupture
+                
+    def reshape(self, n_points):
+        num_segments = len(self.force_Y) // n_points
+
+        # Reshape the data into segments of n_points points
+        force_Y_reshaped = self.force_Y[:num_segments*n_points].reshape(num_segments, n_points)
+        λ_reshaped = self.λ[:num_segments*n_points].reshape(num_segments, n_points)
+
+        # Calculate the average of each segment
+        force_Y_reshaped = np.mean(force_Y_reshaped, axis=1)
+        λ_reshaped = np.mean(λ_reshaped, axis=1)
+
+        return force_Y_reshaped, λ_reshaped
     
 
     def sequential_analysis(self, print_not_saved=True, save_files=True):
@@ -162,19 +261,24 @@ class Txt_Reading:
             unfold_N_max = max([int(f.split("_u.txt")[0]) for f in all_files if "_u.txt" in f])
             for N in range(1, fold_N_max+1):
                 file_f = self.readTxt(number = m, N = N, ty = 'f', print_out=False, initial_t_time=True)
-                if 1.5 < self.f_rupture[0] < 9.2 and 30 < self.N_nucleotides[0] < 60 and self.λ_0[0] < 0.8:
+                if (self.N_fits == 2 and 30 < self.N_nucleotides[0] < 60) or self.N_fits == 1:
                     m_f.append([self.params[:5]]) # saving the parameters
                 else:
                     if print_not_saved:
                         print(f'Not saving file {self.path}')
+                        if len(self.λ) != 0:
+                            self.make_plot(save_fig=True, number=m, N=N, ty='f')
+                        
             for N in range(1, unfold_N_max+1):
                 file_u = self.readTxt(number = m, N = N, ty = 'u', print_out=False, initial_t_time=True)
-                if 1.5 < self.f_rupture[0] < 9.2 and 30 < self.N_nucleotides[0] < 60 and self.λ_0[0] < 0.8:
+                if (self.N_fits == 2 and 30 < self.N_nucleotides[0] < 60) or self.N_fits == 1:
                     m_u.append([self.params[:5]]) # saving the parameters 
                 else:
                     if print_not_saved:
                         print(f'Not saving file {self.path}')
-
+                        if len(self.λ) != 0:
+                            self.make_plot(save_fig=True, number=m, N=N, ty='u')
+                        
             all_molecules_f.append(m_f)
             all_molecules_u.append(m_u)
 
@@ -275,7 +379,7 @@ class Txt_Reading:
     
   
     def _set_initial_time(self, ty):
-        # check if there a meta-file:
+        # check if there is a meta-file:
         self.metafile_path = f'{self.working_dir}/{self.number}/meta_t0.txt'
         if os.path.isfile(self.metafile_path):
             # the file exists
@@ -285,6 +389,14 @@ class Txt_Reading:
             t_0 = self.time[0] if ty == 'u' else self.time[-1]  # start from t = 0 s
             np.savetxt(self.metafile_path, np.array([t_0]), header=f'Molecule: {self.number}')
         return t_0
+    
+
+    def _errors(self):
+        self.index, self.λ_0, self.f_rupture, self.f_rupture_next, self.x_ssDNA, self.N_nucleotides = [[0]]*6
+        # t_0 now represents the initial time of the data
+        self.t_0 = [min([self.time[0], self.time[-1]])]
+        self.popt_pre, self.popt_post = [0, 0], [0, 0]
+        self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.t_0 + self.λ_0 + self.popt_pre + self.popt_post + [self.N_fits]
 
     # Inverse function of f(x) from WLC model
     def x_WLC_f(self, f):
@@ -343,3 +455,55 @@ class Txt_Reading:
         # L = N*d_aa   # nm
 
         return y    #*self.L   
+    
+
+    def _compute_fit(self, ind, fitting_points, λ, force_Y):
+        pre_λ = λ[ind-fitting_points:ind]
+        pre_f = force_Y[ind-fitting_points:ind]
+        popt_pre, _ = curve_fit(lambda x, a, b: x*a+b, pre_λ, pre_f)
+        post_λ = λ[ind:ind+fitting_points]
+        post_f = force_Y[ind:ind+fitting_points]
+        popt_post, _ = curve_fit(lambda x, a, b: x*a+b, post_λ, post_f)
+        return popt_pre, popt_post
+    
+    def _linear_fit(self):
+        λ = self.λ
+        f = self.force_Y
+        popt, _ = curve_fit(lambda x, a, b: x*a+b, λ, f)
+        return popt[0]*λ+popt[1]
+        
+    def chi_squared(self, mode=""):
+        ind = int(self.index)
+        fitting_points = self.fitting_points if ind > self.fitting_points else ind
+        std = np.std(self.force_Y[ind-fitting_points:ind+fitting_points])
+        if mode:
+            # linear
+            return (np.sum((self.force_Y[ind-fitting_points:ind+fitting_points] - 
+                            self._linear_fit()[ind-fitting_points:ind+fitting_points])/std))**2
+        # default: double-jump
+        [a, b], [c, d] = self._compute_fit(ind=ind, fitting_points=fitting_points, λ=self.λ, force_Y=self.force_Y)
+        return (np.sum((self.force_Y[ind-fitting_points:ind+fitting_points] - self._heviside_fitting(self.λ[ind-fitting_points:ind+fitting_points],
+                                                                                                     self.λ_0, a, b, c, d))/std))**2
+
+    def make_plot(self, save_fig, number, N, ty, txt=True):
+        fig = plt.figure()
+        plt.plot(self.λ, self.force_Y, label = 'Data')
+        if self.N_fits == 2:
+            ind = int(self.index[0])
+            fitting_points = self.fitting_points if ind > self.fitting_points else ind
+            plt.plot(self.λ[ind-fitting_points:ind+fitting_points], self.theor_f[ind-fitting_points:ind+fitting_points], lw=2.5, label = 'Fit')
+        plt.xlabel('$\lambda \\: [nm]$')
+        plt.ylabel('$f_Y \\: [pN]$')
+        plt.grid()
+        plt.legend()
+        plt.title(f'{self.path}')
+        if txt:
+            plt.text(x=min(self.λ), y=min([max(self.force_Y)/2, int(self.f_MAX)/2]), s=f'N = {self.N_nucleotides}\n # of fits = {self.N_fits}\n f_r = {self.f_rupture}')
+        if save_fig:
+            path = f'imgs/not_saved/{self.folder}/{self.f_MAX}'
+            if not os.path.exists(path):
+                os.makedirs(path) # create folder
+            plt.savefig(f'{path}/{number}_{N}_{ty}.png', dpi=100)
+            plt.close(fig) 
+        else:
+            plt.show()
