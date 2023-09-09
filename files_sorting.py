@@ -194,6 +194,7 @@ class Txt_Reading:
             
             try:
                 popt_pre, popt_post = self._compute_fit(ind, fitting_points, λ_reshaped, force_Y_reshaped)
+                f_rupture_next = (popt_post[0]*λ_reshaped[ind:ind+fitting_points] + popt_post[1])[0]
                 t_0, k_eff, x_ssDNA, N_nucleotides = self._compute_interesting_variables(popt_pre, ind, [f_rupture], [f_rupture_next])
             except:                    
                 continue
