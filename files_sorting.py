@@ -189,7 +189,7 @@ class Txt_Reading:
                 if self.best:
                     b = self.choice(np.array(self.best).flatten())
                     # b = 5*b if b != 1 else b
-                    self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=b)  
+                    self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=b*5)  
                 # else:
                 #     self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=1)  
                 self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.t_0 + self.λ_0 + self.popt_pre.tolist() + self.popt_post.tolist() + [self.N_fits]
