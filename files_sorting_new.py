@@ -18,9 +18,8 @@ class Txt_Reading:
         self.dir_name = 'F:/Zaltron & Xavi/' + self.folder + '/'
         self.f_MAX = str(f_MAX)
         self.name = f'pull{self.f_MAX}'
-        self.dictionary = {'10':9, '15':9, '20':9, '25':9, '30':9, '35':9}
+        self.dictionary = {'10':8, '15':8, '20':8, '25':8, '30':8, '35':8}
         self.fit = {1:15, 2:15, 3:15, 4:10, 5:10, 6:7, 7:7, 8:5, 9:5, 10:10}
-        self.decision = 3.0 if int(self.f_MAX) < 15 else -0.2
 
         self.working_dir = f'Data/{self.folder}/{self.f_MAX}'
         if not os.path.exists(self.working_dir):
@@ -50,7 +49,7 @@ class Txt_Reading:
         # Normalization
         self.λ = (self.λ_original - np.min(self.λ_original))/(np.max(self.λ_original)-np.min(self.λ_original))
 
-        self.fitting_points = 15  if int(self.f_MAX) < 15 else 10 # number of points used for linear fits
+        self.fitting_points = 15   # number of points used for linear fits
         self.N_fits = 0     # Number of fits performed: it can be 0 (no results), 1 (the molecule doesn't open/close), 2 (standard case)
         self.best, self.linear = [], []
 
@@ -58,10 +57,10 @@ class Txt_Reading:
         #     # default reshape of 5
         #     self.force_Y, self.λ = self.reshape(5)
 
-        try:
-            self.analysis(print_out=print_out, forced_reshaped=forced_reshaped, graph=graph)
-        except:
-            self._errors()
+        # try:
+        self.analysis(print_out=print_out, forced_reshaped=forced_reshaped, graph=graph)
+        # except:
+        #     self._errors()
 
 
         columns = ["f_rupture", "f_rupture_next", "x_ssDNA", "N_nucleotides", "t_0", "λ_0", "a_pre", "b_pre", "a_post", "b_post", "N_fits"]
@@ -77,28 +76,23 @@ class Txt_Reading:
         # f = int(len(force_Y) // 1.5) 
         # prova = all_indexes[all_indexes > l]
         # prova = prova[prova < f]
-        all_indexes = all_indexes[all_indexes > 5]
         prova = []
         if len(prova) != 0:
             all_indexes = prova.tolist()
         else:
             all_indexes = all_indexes.tolist()
 
-        if len(all_indexes) % 2 == 0 and len(all_indexes) != 0:
+        if len(all_indexes) % 2 == 0:
             all_indexes.append(0)
-            median_index = np.array([np.median(all_indexes)], dtype=int)
-        else:
-            median_index = [int(self.force_Y.size/2)]
+        median_index = np.array([np.median(all_indexes)], dtype=int)
         return all_indexes, median_index
 
 
     def analysis(self, print_out=True, forced_reshaped=False, graph=False):
         if np.abs(self.time[-1] - self.time[0]) < (np.max(self.force_Y) - np.min(self.force_Y)
-                                                   )/self.loading_rate or max(self.force_Y)+1 < int(self.f_MAX
+                                                   )/self.loading_rate or max(self.force_Y) < int(self.f_MAX
                                                                                                   ) or min(self.force_Y) > int(self.f_MAX
-                                                                                                                               )/3 or self.λ.size < 50 or self.force_Y[-50:-1].mean() < int(self.f_MAX)/2 or max(self.force_Y) > int(self.f_MAX
-                                                                                                                                                                                                                                     )+4 or self.λ[np.where(self.force_Y == min(
-                                                                                                                                                                                                                                         self.force_Y))[0][0]]>0.1:
+                                                                                                                               )/3 or self.λ.size < 50:
             self._errors()
             # Noise or other useless data
             if graph:
@@ -113,13 +107,10 @@ class Txt_Reading:
         if self.index[0] < 5:
             # it's impossible to perform a fit: try changing the index
             # and see if reshaping the problem solves itself
-            self.index = [6]
+            self.index = self.index_med
         
-        if force_Y_reshaped[self.index] > 7:
-            self.linear.append(1)
-        elif c != np.Inf and force_Y_reshaped[self.index] > 3 and N_p < 80:
+        if c != np.Inf:
             self.best.append([1, c, N_p])
-
 
         if forced_reshaped:
             self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=forced_reshaped)
@@ -188,8 +179,7 @@ class Txt_Reading:
                 self.N_fits = 2
                 if self.best:
                     b = self.choice(np.array(self.best).flatten())
-                    # b = 5*b if b != 1 else b
-                    self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=b)  
+                    self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=b*5)  
                 # else:
                 #     self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=1)  
                 self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.t_0 + self.λ_0 + self.popt_pre.tolist() + self.popt_post.tolist() + [self.N_fits]
@@ -200,16 +190,13 @@ class Txt_Reading:
                 # compute χ² to evaluate best result
                 b = self.choice(np.array(self.best).flatten())
                 self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=b*5)   
-                if int(self.f_MAX) < 15: 
-                    chi_models = np.array([self.chi_squared(mode='linear')/len(self.linear), self.chi_squared()/len(self.best)])
-                else:
-                    chi_models = np.array([self.chi_squared(mode='linear'), self.chi_squared()])    
+                chi_models = np.array([self.chi_squared(mode='linear'), self.chi_squared()])
                 if print_out:
                     print(f'χ² = {chi_models}')
                 
                 wh = np.where(chi_models == min(chi_models))[0]
 
-                if np.abs(np.diff(chi_models)) <= self.decision or wh[0] == 1 or chi_models[1] < 10:
+                if np.abs(np.diff(chi_models)) <= 0.2 or wh[0] == 1:
                     # double-jump
                     self.N_fits = 2
                     self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.t_0 + self.λ_0 + self.popt_pre.tolist() + self.popt_post.tolist() + [self.N_fits]
@@ -246,7 +233,7 @@ class Txt_Reading:
         
 
     def bootstrap(self, λ_reshaped, force_Y_reshaped, time_reshaped, all_indexes, index_med):
-        best_index, best_chi = 6, np.Inf
+        best_index, best_chi = index_med, np.Inf
         N_prev = 0
         for index in all_indexes:
             if index < 5:
@@ -283,7 +270,6 @@ class Txt_Reading:
         all_indexes, index_med = self.find_jumps(self.force_Y)
         # print(f'all indexes = {all_indexes}')
         index, _, _ = self.bootstrap(λ_reshaped=self.λ, force_Y_reshaped=self.force_Y, time_reshaped=self.time, all_indexes=all_indexes, index_med=index_med[0])
-        # print(index)
         # if index < 5:
         #     print(f'Index is {index}')
         #     return [np.Inf]*3
@@ -321,12 +307,9 @@ class Txt_Reading:
             # times the scale factor - n_points - used to calculate the average before  
             
             all_indexes, index_med = self.find_jumps(force_Y=force_Y_reshaped)
-            if index_med == None:
-                continue
             # for this configuration we aim to find the best possible index, among all the available ones.
             ind, chi, N_prev = self.bootstrap(λ_reshaped=λ_reshaped, force_Y_reshaped=force_Y_reshaped, time_reshaped=time_reshaped, all_indexes=all_indexes, index_med=index_med[0])            
             λ_0 = λ_reshaped[ind]
-
             f_rupture = force_Y_reshaped[ind]
             fitting_points = self.fitting_points if ind > self.fitting_points else ind
             # fitting_points = self.fit[n_points] if ind > self.fit[n_points] else ind
@@ -342,15 +325,11 @@ class Txt_Reading:
             # print(f'Reshape = {n_points} \n f_rupture = {f_rupture} \n f_rupture_next = {f_rupture_next} \n index = {ind}')
             
             # condition = f_rupture - f_rupture_next < 0.1 if self.ty == 'u' else f_rupture_next - f_rupture < 0.1
-            cond = True if int(self.f_MAX) < 15 else f_rupture > 3 
-            if f_rupture - f_rupture_next > 0.1 and cond and N_prev < 80: # and (0.12 < λ_0 < 0.51): 
+            if f_rupture - f_rupture_next > 0.1: # and (0.12 < λ_0 < 0.51): 
                 # work with reshaped data
                 if chi < off_chi:
                     off_chi = chi
                     self.best.append([n_points, chi, N_prev])
-
-                else:
-                    self.linear.append(n_points)
 
                 # self.force_Y = force_Y_reshaped.copy()
                 # self.λ = λ_reshaped.copy()
@@ -406,7 +385,7 @@ class Txt_Reading:
             return int(n[lowest_chi])
         else:
             # They are different, so choose wisely:
-            if 25 < np.max(N_prev) < 60:
+            if 25 < np.max(N_prev) < 65:
                 return int(n[highest_N])
             else:
                 return int(n[lowest_chi])
