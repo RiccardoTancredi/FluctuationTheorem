@@ -494,7 +494,7 @@ class Txt_Reading:
             file = file[:, [0, 15, 18, 21, 31, 32]]
             file = np.c_[file, λ]
             
-            # Select folded & unfolden on the basis of status
+            # Select folded & unfolded on the basis of status
             # U for Unfolding (Status=131), F for Folding (Status=130)
             unfolding = file[file[:, -2] == 131]
             folding = file[file[:, -2] == 130]
