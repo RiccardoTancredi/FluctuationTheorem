@@ -11,8 +11,8 @@ f_max = 10
 reading = Txt_Reading(folder, f_max)
 
 # file = reading.readTxt(number=7, N=18, ty='u', forced_reshaped=0, graph=True) # 10 reshape works best
-
-molecules, all_molecules_f, all_molecules_u = reading.seq_analysis_post_meta()
+if reading.finish:
+    molecules, all_molecules_f, all_molecules_u = reading.seq_analysis_post_meta()
 
 
 overall_images = True
