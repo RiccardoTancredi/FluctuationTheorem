@@ -20,9 +20,9 @@ single_molecules_images = True
 
 plots = Draw(folder, f_max)
 
-if overall_images:
+if overall_images and reading.finish:
     plots.final_plots(molecules, all_molecules_f, all_molecules_u)
 
-if single_molecules_images:
+if single_molecules_images and reading.finish:
     plots.plots_per_single_molecule(molecules, all_molecules_f, all_molecules_u)
         

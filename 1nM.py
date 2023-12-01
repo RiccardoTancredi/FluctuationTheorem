@@ -10,7 +10,7 @@ folder = "1nM"
 f_max = 10
 reading = Txt_Reading(folder, f_max)
 
-# file = reading.readTxt(number=7, N=18, ty='u', forced_reshaped=0, graph=True) # 10 reshape works best
+# file = reading.readTxt(number=8, N=28, ty='u', forced_reshaped=10, graph=True) # 10 reshape works best
 if reading.finish:
     molecules, all_molecules_f, all_molecules_u = reading.seq_analysis_post_meta()
 

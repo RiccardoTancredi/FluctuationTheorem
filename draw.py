@@ -117,7 +117,7 @@ class Draw:
         self.ax.set_title(f'{path}')
 
         # Create RectangleSelector
-        self.rs = RectangleSelector(self.ax, self.onselect, drawtype='box', 
+        self.rs = RectangleSelector(self.ax, self.onselect, 
                                     useblit=False, button=[1],
                                     minspanx=5, minspany=5, 
                                     spancoords='pixels', interactive=True)
