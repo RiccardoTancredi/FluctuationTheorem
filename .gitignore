@@ -7,3 +7,6 @@ file_hopping.py
 remove_t0.py
 prova.py
 create_Data.py
+prova/*
+*.gif
+*new*.py

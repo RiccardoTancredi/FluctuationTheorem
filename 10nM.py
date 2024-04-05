@@ -1,9 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from analysis import Txt_Reading
+from analysis.analysis import Txt_Reading
 import pandas as pd
 import os
-from draw import Draw
+from analysis.draw import Draw
 
 folder = "10nM"
 # f_MAX = [10, 15, 20, 25, 30, 35]

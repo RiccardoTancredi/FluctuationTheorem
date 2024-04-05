@@ -1,6 +1,5 @@
 import os
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.widgets import RectangleSelector, Button
 
@@ -26,7 +25,7 @@ class Draw:
             print("The images directory is created...")
 
             
-    def draw_fit_diff(self, λ_filtered, diff, std, theor_std, points, number, N, save=True):
+    def draw_fit_diff(self, λ_filtered, diff, std, theor_std, points, number, N, ty, save=True):
         # fig = plt.figure()
         plt.plot(λ_filtered, diff)
         plt.scatter(points[0], points[1], marker='D', color='black', linewidths=2.)
@@ -34,9 +33,9 @@ class Draw:
         plt.hlines(-std, min(λ_filtered), max(λ_filtered), ls='--', color='red')
         plt.hlines(theor_std, min(λ_filtered), max(λ_filtered), ls='--', color='green')
         plt.hlines(-theor_std, min(λ_filtered), max(λ_filtered), ls='--', color='green')
-        plt.title(f'{number}_{N}_{self.ty}')
+        plt.title(f'{number}_{N}_{ty}')
         # if save:
-        #     plt.savefig(f'{self.working_dir}/{number}_{N}_{self.ty}.png', dpi=100)
+        #     plt.savefig(f'{self.working_dir}/{number}_{N}_{ty}.png', dpi=100)
         #     plt.close(fig)
         # else:
         plt.show()
@@ -47,7 +46,7 @@ class Draw:
         # Callback function for RectangleSelector
         x1, y1 = eclick.xdata, eclick.ydata
         x2, y2 = erelease.xdata, erelease.ydata
-        print(f"Selected region: x1={x1}, y1={y1}, x2={x2}, y2={y2}")
+        # print(f"\nSelected region: x1={x1}, y1={y1}, x2={x2}, y2={y2}")
 
         # Update the plot based on the selected region
         self.ax.set_xlim(min(x1, x2), max(x1, x2))
@@ -146,7 +145,7 @@ class Draw:
 
         # Create Unknwon(?) button
         self.unknown = Button(plt.axes([0.8, 0.35, 0.1, 0.07]), '?', color='gray')
-        self.unknown.on_clicked(lambda event: self.unknown_callback(event, trashes))        
+        self.unknown.on_clicked(lambda event: self.unknown_callback(event, unknown))        
    
 
         # Create Stop button
@@ -170,6 +169,42 @@ class Draw:
 
 
         return jumps, linears, trashes, unknown, finish
+
+
+    def make_plot(self, λ, force_Y, theor_f, N_fits, discr, index, fitting_points, 
+                  N_nucleotides, f_rupture, f_rupture_next, path, save_fig, folder, number, N, ty, txt=True):
+        fig = plt.figure()
+        plt.plot(λ, force_Y, label = 'Data')
+        if N_fits == 2:
+            try:
+                ind = int(index[0])
+            except:
+                ind = int(index)
+            x = np.concatenate((np.linspace(min(λ), λ[ind], ind), np.linspace(λ[ind], max(λ), len(λ)-ind)))
+            plt.plot(x, theor_f, lw=2.5, ls='--', label='Fit')
+            plt.vlines(λ[ind], min(force_Y), max(force_Y), color='k', ls=':')
+            plt.scatter(x[ind-1], f_rupture[0], marker='D', s=40, color='black')
+            plt.scatter(x[ind], f_rupture_next[0], marker='D', s=40, color='black')
+
+        plt.xlabel('$\lambda_r$')
+        plt.ylabel('$f_Y \\: [pN]$')
+        plt.legend()
+        plt.title(f'{path}')
+        plt.grid(ls='--')
+
+        if txt == True:
+            # default option
+            dif = f_rupture[0] - f_rupture_next[0]
+            txt_string = r'$N_{nucleotides}$'+f'={N_nucleotides[0]:.3f}\n'+r'$\Delta F$'+f'={dif:.3f}\n'+r'$f_{rupture}$'+f'={f_rupture[0]:.3f}'
+            plt.text(x=min(λ), y=min([max(force_Y)/2, int(self.f_MAX)/2]), s=txt_string)
+        elif txt:
+            plt.text(x=min(λ), y=min([max(force_Y)/2, int(self.f_MAX)/2]), s=txt)
+        if save_fig:
+            plt.savefig(f'{folder}/{number}_{N}_{ty}.png', dpi=100)
+            plt.close(fig) 
+        else:
+            plt.show()
+
     
 
     def final_plots(self, molecules, all_molecules_f, all_molecules_u, show=True):

@@ -4,8 +4,8 @@ import string
 from scipy.optimize import curve_fit
 from tqdm import tqdm
 import pandas as pd
-import matplotlib.pyplot as plt
-from draw import Draw
+from .draw import Draw
+from .rip_founder import method2
 
 
 #########################################
@@ -25,6 +25,7 @@ class Txt_Reading:
         self.dir_name = 'E:/Zaltron & Xavi/' + self.folder + '/'
         self.f_MAX = str(f_MAX)
         self.name = f'pull{self.f_MAX}'
+        self.discr = '2'
         
         self.working_dir = f'Data/{self.folder}/{self.f_MAX}'
         if not os.path.exists(self.working_dir):
@@ -32,6 +33,7 @@ class Txt_Reading:
             self._createTxt()
 
         self.meta_dir = f'meta/{self.folder}/{self.f_MAX}'
+        self.draw = Draw(self.folder, self.f_MAX)
         if meta:
             if not os.path.exists(self.meta_dir):
                 os.makedirs(self.meta_dir)
@@ -41,7 +43,9 @@ class Txt_Reading:
                 # check if the manual analysis has finished      
                 self.finish = False if os.path.exists(f'{self.meta_dir}/interrupt.txt') else True 
                 if not self.finish:
-                    self._create_meta()        
+                    self._create_meta()    
+                else:
+                    self.check_meta_is_complete()    
 
     
     def readTxt(self, number = 1, N = 1, ty = 'u', print_out = True, forced_reshaped = 0, graph = False, initial_t_time = False):
@@ -51,7 +55,7 @@ class Txt_Reading:
 
         self.file = np.loadtxt(self.path)
 
-        # take account only of rows with f = 100 kHz
+        # take account of only rows with f = 100 kHz
         self.file = self.file[1:][np.diff(self.file[:, 0]) == 1, :]
 
         self.λ_original = self.file[:, -1] if ty == 'u' else self.file[:, -1][::-1]
@@ -68,15 +72,40 @@ class Txt_Reading:
         self.fitting_points = 15 if int(self.f_MAX) < 15 else 10 # number of points used for linear fits
         self.N_fits = 0     # Number of fits performed: it can be 0 (no results), 1 (the molecule doesn't open/close), 2 (standard case)
         self.best = []
+        
+        self.called_errors = False
 
-        # if not forced_reshaped:
-        #     # default reshape of 5
-        #     self.force_Y, self.λ = self.reshape(5)
+        self.new_method = method2(self.λ, self.force_Y, self.time, self._compute_interesting_variables)
 
-        try:
-            self.analysis(print_out=print_out, forced_reshaped=forced_reshaped, graph=graph)
-        except:
-            self._errors()
+        if forced_reshaped:
+            try:
+                self.analysis(print_out=print_out, forced_reshaped=forced_reshaped, graph=False)
+            except:
+                self._errors()
+        else:
+            try:            
+                self.new_method.find_rip(ty=self.ty)
+                self.params = self.new_method.params
+                self.λ = self.new_method.λ
+                self.force_Y = self.new_method.force_Y
+                self.λ_0, self.index = self.new_method.λ_0, self.new_method.index
+                self.f_rupture, self.f_rupture_next = self.new_method.f_rupture, self.new_method.f_rupture_next 
+                self.theor_f = self.new_method.theor_f
+                self.N_fits = self.new_method.N_fits
+                self.N_nucleotides = self.new_method.N_nucleotides
+                self.k_eff = self.new_method.k_eff
+                    
+            except:
+                self._errors()
+
+
+        if graph:
+            if not self.called_errors:
+                self.draw.make_plot(self.λ, self.force_Y, self.theor_f, self.N_fits, self.discr, self.index, self.fitting_points, self.N_nucleotides, 
+                                    self.f_rupture, self.f_rupture_next, self.path, save_fig=False, folder='', number=0, N=0, ty=self.ty)                     
+            else:
+                self.draw.make_plot(self.λ, self.force_Y, [], 0, self.discr, self.index, 0, self.N_nucleotides, 
+                                    self.f_rupture, self.f_rupture_next, self.path, save_fig=False, folder='', number=0, N=0, ty=self.ty, txt=False)                     
 
 
         columns = ["f_rupture", "f_rupture_next", "x_ssDNA", "N_nucleotides", "t_0", "λ_0", "a_pre", "b_pre", "a_post", "b_post", "N_fits"]
@@ -112,7 +141,6 @@ class Txt_Reading:
         # or where a rip is visible.
         # The method is called only if the meta file has already been create 
         # and all the molecules have been analyzed
-        self.draw = Draw(self.folder, self.f_MAX)
         jumps, linear, trash, unknown = [], [], [], []
         print(f'self.finish = {self.finish}')
         molecules = np.sort([int(m) for m in os.listdir(self.working_dir)])  # molecule numbers
@@ -138,7 +166,7 @@ class Txt_Reading:
         
         molecules = molecules[molecules >= last_molecule]
         print(molecules)
-        for m in tqdm(molecules):
+        for m in tqdm(molecules, dynamic_ncols=True, colour='green'):
             path = f'{self.working_dir}/{m}/'
             all_files = np.array(os.listdir(path))
             fold_N_max = max([int(f.split("_f.txt")[0]) for f in all_files if "_f.txt" in f])
@@ -164,7 +192,7 @@ class Txt_Reading:
                     continue
                 # call draw routines
                 jumps, linear, trash, unknown, self.finish = self.draw.identify_by_hand(self.λ, self.force_Y, self.path, jumps, linear, trash, unknown, self.finish)
-            
+
             if type == 'f':
                 last_number = 1
                 type = ''
@@ -186,33 +214,102 @@ class Txt_Reading:
                     continue
                 # call draw routines
                 jumps, linear, trash, unknown, self.finish = self.draw.identify_by_hand(self.λ, self.force_Y, self.path, jumps, linear, trash, unknown, self.finish)
-                
+            
+            if type == 'u':
+                last_number = 1
+                type = ''
+
             if not self.finish:
                 info, type = self.path.split('.txt')[0].split('_')
                 last_molecule, last_number = info.split('/')[-2:]
                 with open(f'{self.meta_dir}/interrupt.txt', 'w') as f:
                     f.write(f'Data/{self.folder}/{self.f_MAX}/{last_molecule}/{last_number}_{type}.txt')   
 
-        # Save/update meta files 
-        with open(f'{self.meta_dir}/jumps.txt', 'w') as f:
-            for string in list(dict.fromkeys(jumps)):
-                f.write(f'{string}\n')
-        
-        with open(f'{self.meta_dir}/linear.txt', 'w') as f:
-            for string in list(dict.fromkeys(linear)):
-                f.write(f'{string}\n')
-
-        with open(f'{self.meta_dir}/trash.txt', 'w') as f:
-            for string in list(dict.fromkeys(trash)):
-                f.write(f'{string}\n')
-
-        with open(f'{self.meta_dir}/unknown.txt', 'w') as f:
-            for string in list(dict.fromkeys(unknown)):
-                f.write(f'{string}\n')
-
+        self._save_meta(jumps, linear, trash, unknown)
         if self.finish:
             os.remove(f'{self.meta_dir}/interrupt.txt')
 
+
+    def check_meta_is_complete(self):
+        self.check_not_finished = True
+        molecules = np.sort([int(m) for m in os.listdir(self.working_dir)])  # molecule numbers
+        with open(f'{self.meta_dir}/jumps.txt', 'r') as f:
+            jumps = [line.strip() for line in f.readlines()]
+        with open(f'{self.meta_dir}/linear.txt', 'r') as f:
+            linear = [line.strip() for line in f.readlines()]
+        with open(f'{self.meta_dir}/trash.txt', 'r') as f:
+            trash = [line.strip() for line in f.readlines()]
+        with open(f'{self.meta_dir}/unknown.txt', 'r') as f:
+            unknown = [line.strip() for line in f.readlines()]
+            
+        for m in tqdm(molecules, dynamic_ncols=True, colour='green'):
+            path = f'{self.working_dir}/{m}/'
+            all_files = np.array(os.listdir(path))
+            fold_N_max = max([int(f.split("_f.txt")[0]) for f in all_files if "_f.txt" in f])
+            unfold_N_max = max([int(f.split("_u.txt")[0]) for f in all_files if "_u.txt" in f])
+
+            if not self.check_not_finished:
+                break
+
+            for N in range(1, fold_N_max+1):
+                if not self.check_not_finished:
+                    break
+                file_name = f'Data/{self.folder}/{self.f_MAX}/{m}/{N}_f.txt'
+                if file_name not in jumps and file_name not in linear and file_name not in trash and file_name not in unknown:
+                    file_f = self._only_readTxt(number = m, N = N, ty = 'f', initial_t_time=False)
+                    conditions = [np.abs(self.time[-1] - self.time[0]) < (np.max(self.force_Y) - np.min(self.force_Y))/self.loading_rate,
+                                max(self.force_Y)+1 < int(self.f_MAX), 
+                                min(self.force_Y) > int(self.f_MAX)/3, 
+                                self.λ.size < 50, 
+                                self.force_Y[-50:-1].mean() < int(self.f_MAX)/2,
+                                max(self.force_Y) > int(self.f_MAX)+4,
+                                self.λ[np.where(self.force_Y == min(self.force_Y))[0][0]]>0.1]
+                    if  sum(conditions) > 0:
+                        # If one of the above conditions is met, the file is trash
+                        trash.append(self.path)
+                        continue
+                    # call draw routines
+                    jumps, linear, trash, unknown, self.check_not_finished = self.draw.identify_by_hand(self.λ, self.force_Y, self.path, jumps, linear, trash, unknown, self.check_not_finished)
+
+            for N in range(1, unfold_N_max+1):
+                if not self.check_not_finished:
+                    break
+                file_name = f'Data/{self.folder}/{self.f_MAX}/{m}/{N}_u.txt'
+                if file_name not in jumps and file_name not in linear and file_name not in trash and file_name not in unknown:
+                    file_u = self._only_readTxt(number = m, N = N, ty = 'u', initial_t_time=False)
+                    conditions = [np.abs(self.time[-1] - self.time[0]) < (np.max(self.force_Y) - np.min(self.force_Y))/self.loading_rate,
+                                max(self.force_Y)+1 < int(self.f_MAX), 
+                                min(self.force_Y) > int(self.f_MAX)/3, 
+                                self.λ.size < 50, 
+                                self.force_Y[-50:-1].mean() < int(self.f_MAX)/2,
+                                max(self.force_Y) > int(self.f_MAX)+4,
+                                self.λ[np.where(self.force_Y == min(self.force_Y))[0][0]]>0.1]
+                    if  sum(conditions) > 0:
+                        # If one of the above conditions is met, the file is trash
+                        trash.append(self.path)
+                        continue
+                    # call draw routines
+                    jumps, linear, trash, unknown, self.check_not_finished = self.draw.identify_by_hand(self.λ, self.force_Y, self.path, jumps, linear, trash, unknown, self.check_not_finished)
+        print('All trajectories have already been categorized')
+        self._save_meta(jumps, linear, trash, unknown)
+
+    def _save_meta(self, jumps, linear, trash, unknown):
+        # Save/update meta files 
+        with open(f'{self.meta_dir}/jumps.txt', 'w') as f:
+            for s_string in list(dict.fromkeys(jumps)):
+                f.write(f'{s_string}\n')
+        
+        with open(f'{self.meta_dir}/linear.txt', 'w') as f:
+            for s_string in list(dict.fromkeys(linear)):
+                f.write(f'{s_string}\n')
+
+        with open(f'{self.meta_dir}/trash.txt', 'w') as f:
+            for s_string in list(dict.fromkeys(trash)):
+                f.write(f'{s_string}\n')
+
+        with open(f'{self.meta_dir}/unknown.txt', 'w') as f:
+            for s_string in list(dict.fromkeys(unknown)):
+                f.write(f'{s_string}\n')
 
     def find_jumps(self, force_Y):
         new_force_Y = force_Y[np.where(force_Y>=0)[0].tolist() and np.where(force_Y<=8)[0].tolist()]
@@ -233,20 +330,24 @@ class Txt_Reading:
         return all_indexes, median_index
 
 
-    def analysis(self, print_out=True, forced_reshaped=False, graph=False):
+    def skip_analysis(self):
         conditions = [np.abs(self.time[-1] - self.time[0]) < (np.max(self.force_Y) - np.min(self.force_Y))/self.loading_rate, 
-                 max(self.force_Y)+1 < int(self.f_MAX), 
-                 min(self.force_Y) > int(self.f_MAX)/3, 
-                 self.λ.size < 50, 
-                 self.force_Y[-50:-1].mean() < int(self.f_MAX)/2,
-                 max(self.force_Y) > int(self.f_MAX)+4,
-                 self.λ[np.where(self.force_Y == min(self.force_Y))[0][0]]>0.1]
+                      max(self.force_Y)+1 < int(self.f_MAX), 
+                      min(self.force_Y) > int(self.f_MAX)/3, 
+                      self.λ.size < 50, 
+                      self.force_Y[-50:-1].mean() < int(self.f_MAX)/2,
+                      max(self.force_Y) > int(self.f_MAX)+5,
+                      self.λ[np.where(self.force_Y == min(self.force_Y))[0][0]]>0.1]
+        
         if  sum(conditions) > 0:
             self._errors()
+            self.called_errors = True
             # Noise or other useless data
-            if graph:
-                self.make_plot(save_fig=False, folder=self.folder, number=self.number, N=self.path.split('_')[0].split('/')[-1], txt=False)
             return -1
+        return 0
+
+    def analysis(self, print_out=True, forced_reshaped=False, graph=False):
+        if self.skip_analysis() == -1: return -1
 
         force_Y_reshaped, λ_reshaped, time_reshaped = self.reshape(5)
         self.all_indexes, self.index_med = self.find_jumps(force_Y=force_Y_reshaped)
@@ -268,7 +369,10 @@ class Txt_Reading:
             self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=forced_reshaped)
             self.N_fits = 2
             self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.t_0 + self.λ_0 + self.popt_pre.tolist() + self.popt_post.tolist() + [self.N_fits]
-            self.theor_f = self._heviside_fitting(self.λ, *self.params[5:-1])   
+            x = np.concatenate((np.linspace(min(self.λ), self.λ[self.index[0]], self.index[0]), 
+                                np.linspace(self.λ[self.index[0]], max(self.λ), len(self.λ) - self.index[0])))
+            
+            self.theor_f = self._heaviside_fitting(x, self.index[0], *self.params[6:-1])   
 
         else: 
             self.λ_0 = λ_reshaped[self.index].tolist()
@@ -306,19 +410,25 @@ class Txt_Reading:
             # else:
             #     self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=1)  
             self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.t_0 + self.λ_0 + self.popt_pre.tolist() + self.popt_post.tolist() + [self.N_fits]
-            self.theor_f = self._heviside_fitting(self.λ, *self.params[5:-1])
+            x = np.concatenate((np.linspace(min(self.λ), self.λ[self.index[0]], self.index[0]), 
+                                np.linspace(self.λ[self.index[0]], max(self.λ), len(self.λ) - self.index[0])))
+            self.theor_f = self._heaviside_fitting(x, self.index[0], *self.params[6:-1])
+
+            # print(self.N_nucleotides)
 
             
-        if graph:
-            ind = int(self.index[0])
-            plt.plot(self.λ, self.force_Y, label = 'Data')
-            plt.plot(self.λ[ind-self.fitting_points:ind+self.fitting_points], self.theor_f[ind-self.fitting_points:ind+self.fitting_points], lw=2.5, label = 'Fit')
-            plt.xlabel('$\lambda \\: [nm]$')
-            plt.ylabel('$f_Y \\: [pN]$')
-            plt.grid()
-            plt.legend()
-            plt.title(f'{self.path}')
-            plt.show()        
+        # if graph:
+        #     self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 2, self.discr, int(self.index[0]), self.fitting_points, self.N_nucleotides, 
+        #                         self.f_rupture, self.f_rupture_next, self.path, save_fig=False, folder='', number=0, N=0, ty=self.ty, txt=False)                     
+        #     # ind = int(self.index[0])
+            # plt.plot(self.λ, self.force_Y, label = 'Data')
+            # plt.plot(self.λ[ind-self.fitting_points:ind+self.fitting_points], self.theor_f[ind-self.fitting_points:ind+self.fitting_points], lw=2.5, label = 'Fit')
+            # plt.xlabel('$\lambda \\: [nm]$')
+            # plt.ylabel('$f_Y \\: [pN]$')
+            # plt.grid()
+            # plt.legend()
+            # plt.title(f'{self.path}')
+            # plt.show()        
 
 
     def _compute_interesting_variables(self, time, popt_pre, index, f_rupture, f_rupture_next):
@@ -355,7 +465,7 @@ class Txt_Reading:
             # χ² could be a reasonable option
             [a, b], [c, d] = popt_pre, popt_post
             # Pearson formulation
-            expected = self._heviside_fitting(λ_reshaped[index-fitting_points:index+fitting_points], λ_0, a, b, c, d)
+            expected = self._heaviside_fitting(λ_reshaped[index-fitting_points:index+fitting_points], index, a, b, c, d)
             std = np.std(force_Y_reshaped[index-fitting_points:index+fitting_points])
             chi = np.sum(((force_Y_reshaped[index-fitting_points:index+fitting_points] - expected)/std)**2)
             # print(f'The index is {index} \n The chi^2 is {chi}')
@@ -487,7 +597,7 @@ class Txt_Reading:
         # Each molecule has different folding and unfolding cycles
         all_molecules_f = []
         all_molecules_u = []
-        for m in tqdm(molecules):
+        for m in tqdm(molecules, dynamic_ncols=True, colour='green'):
             m_f = []
             m_u = []
             path = f'{self.working_dir}/{m}/'
@@ -499,28 +609,45 @@ class Txt_Reading:
                 if self.N_fits > 0 and 0 <= self.N_nucleotides[0] < 100:
                     m_f.append([self.params[:5]]) # saving the parameters
                     if self.N_fits == 1:
-                        self.make_plot(save_fig=True, folder='saved/linear', number=m, N=N)
+                        self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 1, self.discr, self.index, self.fitting_points, self.N_nucleotides, 
+                                            self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder='saved/linear', number=m, 
+                                            N=N, ty=self.ty)
                     else:
-                        self.make_plot(save_fig=True, folder='saved', number=m, N=N)
+                        self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 2, self.discr, self.index, self.fitting_points, self.N_nucleotides, 
+                                            self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder='saved', number=m, 
+                                            N=N, ty=self.ty)
+                        # self.make_plot(save_fig=True, folder='saved', number=m, N=N)
                 else:
                     if print_not_saved:
-                        print(f'Not saving file {self.path}')
+                        print(f'\nNot saving file {self.path}\n')
                         if len(self.λ) != 0:
-                            self.make_plot(save_fig=True, folder='not_saved', number=m, N=N)
+                            self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 0, self.discr, self.index, self.fitting_points, self.N_nucleotides,
+                                                self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder='not_saved', number=m, 
+                                                N=N, ty=self.ty)
+                            # self.make_plot(save_fig=True, folder='not_saved', number=m, N=N)
                         
             for N in range(1, unfold_N_max+1):
                 file_u = self.readTxt(number = m, N = N, ty = 'u', print_out=False, initial_t_time=True)
                 if self.N_fits > 0 and 0 <= self.N_nucleotides[0] < 100:
                     m_u.append([self.params[:5]]) # saving the parameters 
                     if self.N_fits == 1:
-                        self.make_plot(save_fig=True, folder='saved/linear', number=m, N=N)
+                        self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 1, self.discr, self.index, self.fitting_points, self.N_nucleotides,
+                                            self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder='saved/linear', number=m, 
+                                            N=N, ty=self.ty)
+                        # self.make_plot(save_fig=True, folder='saved/linear', number=m, N=N)
                     else:
-                        self.make_plot(save_fig=True, folder='saved', number=m, N=N)
+                        self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 2, self.discr, self.index, self.fitting_points, self.N_nucleotides,
+                                            self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder='saved', number=m, 
+                                            N=N, ty=self.ty)
+                        # self.make_plot(save_fig=True, folder='saved', number=m, N=N)
                 else:
                     if print_not_saved:
-                        print(f'Not saving file {self.path}')
+                        print(f'\nNot saving file {self.path}\n')
                         if len(self.λ) != 0:
-                            self.make_plot(save_fig=True, folder='not_saved', number=m, N=N)
+                            self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 0, self.discr, self.index, self.fitting_points, self.N_nucleotides,
+                                                self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder='not_saved', number=m, 
+                                                N=N, ty=self.ty)
+                            # self.make_plot(save_fig=True, folder='not_saved', number=m, N=N)
                         
             all_molecules_f.append(m_f)
             all_molecules_u.append(m_u)
@@ -532,6 +659,7 @@ class Txt_Reading:
 
 
     def seq_analysis_post_meta(self, print_not_saved=True, save_files=True):
+
         ##################
         # Jumps analysis #
         ##################
@@ -550,60 +678,96 @@ class Txt_Reading:
         with open(f'{self.meta_dir}/trash.txt', 'r') as f:
             trash = [line.strip() for line in f.readlines()]
 
-        molecules = sorted([int(m) for m in os.listdir(self.working_dir)])  # molecule numbers
+        molecules = sorted([int(m) for m in os.listdir(self.working_dir)])  # molecule's numbers
+
+
+        # Create folders
+        jump_dir = f'imgs/{self.folder}/{self.f_MAX}/jumps/'
+        os.makedirs(jump_dir, exist_ok=True)
+        not_saved_dir = f'imgs/{self.folder}/{self.f_MAX}/not_saved/'
+        os.makedirs(not_saved_dir, exist_ok=True)
+        linear_dir = f'imgs/{self.folder}/{self.f_MAX}/linear/'
+        os.makedirs(linear_dir, exist_ok=True)
+        trash_dir = f'imgs/{self.folder}/{self.f_MAX}/trash/'
+        os.makedirs(trash_dir, exist_ok=True)
+
         # Each molecule has different folding and unfolding cycles
         all_molecules_f = []
         all_molecules_u = []
-        for m in tqdm(molecules):
+        for m in tqdm(molecules, dynamic_ncols=True, colour='green'):
             m_f = []
             m_u = []
             path = f'{self.working_dir}/{m}/'
             all_files = np.array(os.listdir(path))
             fold_N_max = max([int(f.split("_f.txt")[0]) for f in all_files if "_f.txt" in f])
             unfold_N_max = max([int(f.split("_u.txt")[0]) for f in all_files if "_u.txt" in f])
+
             for N in range(1, fold_N_max+1):
                 file_f = self.readTxt(number = m, N = N, ty = 'f', print_out=False, initial_t_time=True)    
                 if f'{path}{N}_f.txt' in jumps:
-                    self.N_fits = 2
-                    if 0 <= self.N_nucleotides[0] < 100:
+                    if 0 < self.N_nucleotides[0] < 100:
                         m_f.append([self.params[:5]]) # saving the parameters
-                        self.make_plot(save_fig=True, folder='saved', number=m, N=N)
+                        self.draw.make_plot(self.λ, self.force_Y, self.theor_f, self.N_fits, self.discr, self.index, self.fitting_points, self.N_nucleotides,
+                                            self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder=jump_dir, number=m, 
+                                            N=N, ty=self.ty)
+                        # self.make_plot(save_fig=True, folder='saved', number=m, N=N)
                     else:
                         if print_not_saved:
-                            print(f'Not saving file {self.path}')
+                            print(f'\nNot saving file {self.path}\n')
                             if len(self.λ) != 0:
-                                self.make_plot(save_fig=True, folder='not_saved', number=m, N=N)
+                                self.draw.make_plot(self.λ, self.force_Y, self.theor_f, self.N_fits, self.discr, self.index, self.fitting_points, self.N_nucleotides,
+                                                    self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder=not_saved_dir, number=m, 
+                                                    N=N, ty=self.ty, txt=False)
+                                # self.make_plot(save_fig=True, folder='not_saved', number=m, N=N)
 
                 elif f'{path}{N}_f.txt' in linear:
                     self.N_fits = 1
                     self._errors()
                     m_f.append([self.params[:5]]) # saving the parameters
-                    self.make_plot(save_fig=True, folder='saved/linear', number=m, N=N)
+                    self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 1, self.discr, self.index, self.fitting_points, self.N_nucleotides,
+                                        self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder=linear_dir, number=m, 
+                                        N=N, ty=self.ty, txt=False)
+                    # self.make_plot(save_fig=True, folder='saved/linear', number=m, N=N)
                 
                 elif f'{path}{N}_f.txt' in trash:
-                    self.make_plot(save_fig=True, folder='not_saved', number=m, N=N)
+                    self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 0, self.discr, self.index, self.fitting_points, self.N_nucleotides,
+                                        self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder=trash_dir, number=m, 
+                                        N=N, ty=self.ty, txt=False)
+                    # self.make_plot(save_fig=True, folder='not_saved', number=m, N=N)
                         
                         
             for N in range(1, unfold_N_max+1):
                 file_u = self.readTxt(number = m, N = N, ty = 'u', print_out=False, initial_t_time=True)
                 if f'{path}{N}_u.txt' in jumps:
-                    if 0 <= self.N_nucleotides[0] < 100:
+                    if 0 < self.N_nucleotides[0] < 100:
                         m_u.append([self.params[:5]]) # saving the parameters 
-                        self.make_plot(save_fig=True, folder='saved', number=m, N=N)
+                        self.draw.make_plot(self.λ, self.force_Y, self.theor_f, self.N_fits, self.discr, self.index, self.fitting_points, self.N_nucleotides,
+                                            self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder=jump_dir, number=m, 
+                                            N=N, ty=self.ty)
+                        # self.make_plot(save_fig=True, folder='saved', number=m, N=N)
                     else:
                         if print_not_saved:
-                            print(f'Not saving file {self.path}')
+                            print(f'\nNot saving file {self.path}\n')
                             if len(self.λ) != 0:
-                                self.make_plot(save_fig=True, folder='not_saved', number=m, N=N)
+                                self.draw.make_plot(self.λ, self.force_Y, self.theor_f, self.N_fits, self.discr, self.index, self.fitting_points, self.N_nucleotides,
+                                                    self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder=not_saved_dir, number=m, 
+                                                    N=N, ty=self.ty, txt=False)
+                                # self.make_plot(save_fig=True, folder='not_saved', number=m, N=N)
 
                 elif f'{path}{N}_u.txt' in linear:
                     self.N_fits = 1
                     self._errors()
                     m_u.append([self.params[:5]]) # saving the parameters
-                    self.make_plot(save_fig=True, folder='saved/linear', number=m, N=N)
+                    self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 1, self.discr, self.index, self.fitting_points, self.N_nucleotides,
+                                        self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder=linear_dir, number=m, 
+                                        N=N, ty=self.ty, txt=False)
+                    # self.make_plot(save_fig=True, folder='saved/linear', number=m, N=N)
                 
                 elif f'{path}{N}_u.txt' in trash:
-                    self.make_plot(save_fig=True, folder='trash', number=m, N=N)
+                    self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 0, self.discr, self.index, self.fitting_points, self.N_nucleotides,
+                                        self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder=trash_dir, number=m, 
+                                        N=N, ty=self.ty, txt=False)
+                    # self.make_plot(save_fig=True, folder='trash', number=m, N=N)
 
 
             all_molecules_f.append(m_f)
@@ -700,8 +864,12 @@ class Txt_Reading:
         np.savetxt(result_path_unfolding, self.res_unfold.values)
 
   
-    def _heviside_fitting(self, x, λ_0, a, b, c, d):
-        return (x*a + b) * np.heaviside(λ_0 - x, 0.5) + (c*x + d) * np.heaviside(x - λ_0, 0.5) 
+    # def _heaviside_fitting(self, x, λ_0, a, b, c, d):
+    #     return (x*a + b) * np.heaviside(λ_0 - x, 0.5) + (c*x + d) * np.heaviside(x - λ_0, 0.5) 
+    
+    def _heaviside_fitting(self, x, λ_0, a, b, c, d):
+        return np.concatenate((x[:λ_0]*a+b, x[λ_0:]*c+d))
+
     
     def _calculation_x_d(self, f):
         return self.d*(1./np.tanh((f*self.d)/self.KBT) - self.KBT/(f*self.d)) # nm
@@ -721,6 +889,7 @@ class Txt_Reading:
     
 
     def _errors(self):
+        self.called_errors = True
         self.index, self.λ_0, self.f_rupture, self.f_rupture_next, self.x_ssDNA, self.N_nucleotides = [[0]]*6
         # t_0 now represents the initial time of the data
         self.t_0 = [min([self.time[0], self.time[-1]])]
@@ -815,28 +984,28 @@ class Txt_Reading:
             return (np.sum(((self.force_Y[ind-fitting_points:ind+fitting_points] - expected)**2)/std**2))
         # default: double-jump
         [a, b], [c, d] = self._compute_fit(ind=ind, fitting_points=fitting_points, λ=self.λ, force_Y=self.force_Y)
-        expected = self._heviside_fitting(self.λ[ind-fitting_points:ind+fitting_points], self.λ_0, a, b, c, d)
+        expected = self._heaviside_fitting(self.λ[ind-fitting_points:ind+fitting_points], ind, a, b, c, d)
         return np.sum(((self.force_Y[ind-fitting_points:ind+fitting_points] - expected)**2)/std**2)
 
-    def make_plot(self, save_fig, folder, number, N, txt=True):
-        fig = plt.figure()
-        plt.plot(self.λ, self.force_Y, label = 'Data')
-        if self.N_fits == 2:
-            ind = int(self.index[0])
-            fitting_points = self.fitting_points if ind > self.fitting_points else ind
-            plt.plot(self.λ[ind-fitting_points:ind+fitting_points], self.theor_f[ind-fitting_points:ind+fitting_points], lw=2.5, label = 'Fit')
-        plt.xlabel('$\lambda \\: [nm]$')
-        plt.ylabel('$f_Y \\: [pN]$')
-        plt.grid()
-        plt.legend()
-        plt.title(f'{self.path}')
-        if txt:
-            plt.text(x=min(self.λ), y=min([max(self.force_Y)/2, int(self.f_MAX)/2]), s=f'N = {self.N_nucleotides}\n # of fits = {self.N_fits}\n f_r = {self.f_rupture}')
-        if save_fig:
-            path = f'imgs/{folder}/{self.folder}/{self.f_MAX}'
-            if not os.path.exists(path):
-                os.makedirs(path) # create folder
-            plt.savefig(f'{path}/{number}_{N}_{self.ty}.png', dpi=100)
-            plt.close(fig) 
-        else:
-            plt.show()
+    # def make_plot(self, save_fig, folder, number, N, txt=True):
+    #     fig = plt.figure()
+    #     plt.plot(self.λ, self.force_Y, label = 'Data')
+    #     if self.N_fits == 2:
+    #         ind = int(self.index[0])
+    #         fitting_points = self.fitting_points if ind > self.fitting_points else ind
+    #         plt.plot(self.λ[ind-fitting_points:ind+fitting_points], self.theor_f[ind-fitting_points:ind+fitting_points], lw=2.5, label = 'Fit')
+    #     plt.xlabel('$\lambda \\: [nm]$')
+    #     plt.ylabel('$f_Y \\: [pN]$')
+    #     plt.grid()
+    #     plt.legend()
+    #     plt.title(f'{self.path}')
+    #     if txt:
+    #         plt.text(x=min(self.λ), y=min([max(self.force_Y)/2, int(self.f_MAX)/2]), s=f'N = {self.N_nucleotides}\n # of fits = {self.N_fits}\n f_r = {self.f_rupture}')
+    #     if save_fig:
+    #         path = f'imgs/{folder}/{self.folder}/{self.f_MAX}'
+    #         if not os.path.exists(path):
+    #             os.makedirs(path) # create folder
+    #         plt.savefig(f'{path}/{number}_{N}_{self.ty}.png', dpi=100)
+    #         plt.close(fig) 
+    #     else:
+    #         plt.show()
