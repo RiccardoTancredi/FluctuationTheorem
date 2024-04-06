@@ -207,7 +207,7 @@ class Draw:
 
     
 
-    def final_plots(self, molecules, all_molecules_f, all_molecules_u, show=True):
+    def final_plots(self, molecules, all_molecules_f, all_molecules_u, show=False):
         # Create images
         fig, ax = plt.subplots(3, figsize=(12, 20))
         g = 0
