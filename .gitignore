@@ -12,3 +12,4 @@ prova/*
 copy.py
 *.npz
 !requirements.txt
+!readme/*

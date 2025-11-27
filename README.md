@@ -54,8 +54,7 @@ The extension coordinate λ is normalized to `[0, 1]`, while force values are op
 
 Relevant implementation:  
 `analysis.py`, class `Txt_Reading`  
-(see `readTxt()` and `_only_readTxt()`)  
-:contentReference[oaicite:0]{index=0}
+(see `readTxt()` and `_only_readTxt()`)
 
 ---
 
@@ -72,8 +71,7 @@ Two independent algorithms are implemented:
   - consistency of the rupture position.
 
 Reference:  
-`rip_founder.py`, class `method2`  
-:contentReference[oaicite:1]{index=1}
+`rip_founder.py`, class `method2`
 
 #### **Method 2 – New (ΔF-maximization strategy)**
 - Median reshaping with fixed window (r ≈ 10).  
@@ -81,16 +79,15 @@ Reference:
 - Selection of the best rip as the one maximizing ΔF under physical constraints.
 
 Reference:  
-`rip_founder_new.py`, class `method2_new`  
-:contentReference[oaicite:2]{index=2}
+`rip_founder_new.py`, class `method2_new`
 
 Both methods output:
-- rupture force \( f_r \)  
-- post-rupture force \( f_{r,\text{next}} \)  
+- rupture force $f_r$ 
+- post-rupture force $f_{r,\text{next}}$  
 - ΔF  
 - λ₀ (transition point)  
 - linear fits before/after the rip  
-- diagnostic χ²  
+- diagnostic $\chi^2$  
 - a reconstructed theoretical force curve
 
 ---
@@ -99,19 +96,16 @@ Both methods output:
 
 From the fitted segments and the WLC model, the library estimates:
 
-- **Effective stiffness** \( k_{\text{eff}} \)  
+- **Effective stiffness** $k_{\text{eff}}$
 - **Released ssDNA length**  
 - **Number of nucleotides** using:  
 
-\[
-N = \frac{x_{\text{ssDNA}}}{x_{\text{WLC}}(f_r)\,d_{\text{aa}}}
-\]
+$$N = \frac{x_{\text{ssDNA}}}{x_{\text{WLC}}(f_r)\,d_{\text{aa}}}$$
 
-- **Transition time** \( t_0 \)
+- **Transition time** $t_0$
 
 Reference:  
-`analysis.py :: _compute_interesting_variables`  
-:contentReference[oaicite:3]{index=3}
+`analysis.py :: _compute_interesting_variables`
 
 ---
 
