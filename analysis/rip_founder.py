@@ -33,7 +33,7 @@ class method2:
         best_reshape = 1
         best_popt_pre, best_popt_post = popt_pre, popt_post
         max_iter = 5
-        best_chi = np.Inf
+        best_chi = np.inf
         possible_reshapes = [5, 10, 15, 20, 25, 30]
 
         guess_λ_0 = 0 
@@ -50,7 +50,7 @@ class method2:
             f_rupture = [theor_fit[new_guess_λ_0-1]]
             f_rupture_next = [theor_fit[new_guess_λ_0]]
             delta_F = f_rupture[0]-f_rupture_next[0]
-            keep_track[r]['old_chi'] = np.Inf 
+            keep_track[r]['old_chi'] = np.inf 
             for iter in range(max_iter):
                 diff = force_Y_reshaped - theor_fit
                 outliers = np.logical_or(diff < np.mean(diff)-1.5*np.std(diff), diff > np.mean(diff)+1.5*np.std(diff))
@@ -123,11 +123,12 @@ class method2:
         self.λ_0 = λ[guess_λ_0]
         self.best_popt_pre = best_popt_pre.tolist()
         self.best_popt_post = best_popt_post.tolist()
-        self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.t_0 + [self.λ_0] + self.best_popt_pre + self.best_popt_post + [2]
+        self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + [self.k_eff] + self.t_0 + [self.λ_0] + self.best_popt_pre + self.best_popt_post + [2]
         self.theor_f = theor_fit
         self.best_reshape = best_reshape
         self.force_Y, self.λ = force_Y, λ
         self.best_chi = best_chi
+        print(len(self.params))
 
 
 
@@ -153,12 +154,16 @@ class method2:
         force_Y_reshaped, λ_reshaped = self.reshape(self.λ, self.force_Y, r)
         # The idea is to try a fit every top points and evaluate the chi^2
         fitting_points = fitting_points
-        best_chi = np.Inf
+        best_chi = np.inf
         all_chi = []
         guess_λ_0 = 0
         self.best_state = False
-        draw = Draw('0nM', '10')
-        vals = range(np.where(λ_reshaped < 0.50)[0][-1], np.where(λ_reshaped > 0.10)[0][0], -1) if ty=='u' else  range(np.where(λ_reshaped > 0.10)[0][0], np.where(λ_reshaped < 0.7)[0][-1], 1)
+        draw = Draw('0nM', '10') # just a placeholder for the draw object
+        if ty == 'u':
+            vals = range(np.where(λ_reshaped < 0.70)[0][-1], np.where(λ_reshaped > 0.05)[0][0], -1)  
+        else:
+            vals = range(np.where(λ_reshaped > 0.05)[0][0], np.where(λ_reshaped < 0.7)[0][-1], 1)
+        
         for i in vals:
 
             λ = λ_reshaped[i-fitting_points:i+fitting_points]
@@ -167,7 +172,7 @@ class method2:
             x = np.concatenate((np.linspace(min(λ_reshaped), λ_reshaped[i], i),
                                 np.linspace(λ_reshaped[i], max(λ_reshaped), len(λ_reshaped)-i)))
             theor_fit = self._heaviside_fitting(x, i, *popt_pre, *popt_post)
-            chi = self.chi_squared(force_Y_reshaped, theor_fit, i)
+            chi = self.chi_squared(f_Y, theor_fit[i-fitting_points:i+fitting_points], fitting_points)
             f_rupture = [theor_fit[i-1]]
             f_rupture_next = [theor_fit[i]]
             delta_F = f_rupture[0] - f_rupture_next[0]
@@ -180,16 +185,20 @@ class method2:
 
             # and (0.1 < delta_F < 1.) 
 
-            if chi < best_chi and (0.1 < delta_F < 1.) and λ_reshaped[i] > 0.12:
+            if chi < best_chi and (0.1 < delta_F < 1.): # and λ_reshaped[i] > 0.12:
                 # print('Best state found!')
                 best_chi = chi
                 guess_λ_0 = i
                 self.best_state = True
                 best_popt_pre, best_popt_post = popt_pre, popt_post
 
+
         if self.best_state:
             # print('Best state found!')
             best_popt_pre, best_popt_post = self.fit(λ_reshaped, force_Y_reshaped, guess_λ_0)
+            # best_popt_pre, best_popt_post = self.fit(λ_reshaped[guess_λ_0-fitting_points:guess_λ_0+fitting_points],
+            #                                          force_Y_reshaped[guess_λ_0-fitting_points:guess_λ_0+fitting_points],
+            #                                          fitting_points)
             
             x = np.concatenate((np.linspace(min(λ_reshaped), λ_reshaped[guess_λ_0], guess_λ_0),
                                 np.linspace(λ_reshaped[guess_λ_0], max(λ_reshaped), len(λ_reshaped)-guess_λ_0)))
@@ -199,13 +208,17 @@ class method2:
             f_rupture_next = [theor_fit[guess_λ_0]]
             delta_F = f_rupture[0] - f_rupture_next[0]
 
-            t_0, k_eff, x_ssDNA, N_nucleotides = self.reading(self.time, best_popt_pre, guess_λ_0, f_rupture, f_rupture_next)
+            t_0, k_eff, x_ssDNA, N_nucleotides = self.reading(self.time, 
+                                                              best_popt_pre if ty == 'u' else best_popt_post, 
+                                                              guess_λ_0, 
+                                                              f_rupture, 
+                                                              f_rupture_next)
 
             index = [guess_λ_0]
             λ_0 = λ_reshaped[guess_λ_0]
             best_popt_pre = best_popt_pre.tolist()
             best_popt_post = best_popt_post.tolist()
-            params = f_rupture + f_rupture_next + x_ssDNA + N_nucleotides + t_0 + [λ_0] + best_popt_pre + best_popt_post + [2]
+            params = f_rupture + f_rupture_next + x_ssDNA + N_nucleotides + [k_eff] + t_0 + [λ_0] + best_popt_pre + best_popt_post + [2]
             theor_f = theor_fit
             best_reshape = r
             best_chi = best_chi
@@ -231,10 +244,10 @@ class method2:
         return d
 
     def _errors(self):
-        index, λ_0, f_rupture, f_rupture_next, x_ssDNA, N_nucleotides = [[0]]*6
+        index, λ_0, f_rupture, f_rupture_next, x_ssDNA, N_nucleotides, k_eff = [[0]]*7
         t_0 = [0]
         popt_pre, popt_post = [0, 0], [0, 0]
-        params = f_rupture + f_rupture_next + x_ssDNA + N_nucleotides + t_0 + λ_0 + popt_pre + popt_post + [0]
+        params = f_rupture + f_rupture_next + x_ssDNA + N_nucleotides + k_eff + t_0 + λ_0 + popt_pre + popt_post + [0]
         return params, index, λ_0, f_rupture, f_rupture_next, x_ssDNA, N_nucleotides, t_0, popt_pre, popt_post
 
 
@@ -250,8 +263,8 @@ class method2:
                                         'f' stands for folding trajectory.
         """
 
-        fitting_points = [5, 10, 15, 20]
-        possible_reshapes = [5, 10, 15, 20, 25, 30]
+        fitting_points = [5, 10, 15, 20, 25] #, 30, 35, 40, 45, 50]
+        possible_reshapes = [1, 5, 10, 15, 20] # , 25, 30
         all_res = []
         for r in possible_reshapes:
             res = []
@@ -277,7 +290,9 @@ class method2:
         """
         self.all_res = all_res
         values = np.array([np.array([d['delta_F'] for d in row]) for row in all_res])
+        # values = np.array([np.array([d['best_chi'] if d['best_chi'] != 0 else np.Inf for d in row]) for row in all_res])
         min_index = np.unravel_index(np.argmax(values), values.shape)
+        # min_index = np.unravel_index(np.argmin(values), values.shape)
 
         [self.f_rupture, self.f_rupture_next, self.t_0, self.k_eff, self.x_ssDNA, 
          self.N_nucleotides, self.index, self.λ_0, self.best_popt_pre, self.best_popt_post, 
@@ -290,6 +305,24 @@ class method2:
         return np.concatenate((x[:λ_0]*a+b, x[λ_0:]*c+d))
 
 
+    # Piecewise-linear function
+    def piecewise_linear(self, λ, guess_λ_0, a1, b1, a2, b2):
+        """Piecewise-linear fit with two segments:
+        - a1*x + b1 per x < x0
+        - a2*x + b2 per x >= x0
+        """
+        return np.piecewise(
+            λ,
+            [λ < guess_λ_0, λ >= guess_λ_0],
+            [lambda x: a1*x + b1, lambda x: a2*x + b2]
+        )
+
+    def fit_piecewise_linear(self, λ, force_Y, guess_λ_0):
+        initial_guess = [guess_λ_0, 1, 0, 1, 0]
+        params, _ = curve_fit(self.piecewise_linear, λ, force_Y, p0=initial_guess)
+        return params
+
+
     def fit(self, λ, force_Y, guess_λ_0):
         pre_λ = λ[:guess_λ_0]
         pre_f = force_Y[:guess_λ_0]
@@ -298,12 +331,12 @@ class method2:
         post_f = force_Y[guess_λ_0:]
         popt_post, _ = curve_fit(lambda x, a, b: x*a+b, post_λ, post_f)
         return popt_pre, popt_post
-
+    
     # The idea is to minimize a chi_squared function or whatever
     def chi_squared(self, data, theor, guess, fitting_params = 5):
         points = min(int(len(data)/4), 15)
         # chi = np.sum(((data[guess-points:guess+points]-theor[guess-points:guess+points])/np.std(data[guess-points:guess+points]))**2)
-        chi = np.sum(((data-theor)/np.std(data))**2)
+        chi = np.sum(((data-theor)/np.std(data))**2)/fitting_params
         # /(len(data[guess-points:guess+points]) - fitting_params)
         return round(chi, 3)
 

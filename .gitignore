@@ -10,3 +10,5 @@ create_Data.py
 prova/*
 *.gif
 *new*.py
+copy.py
+*.npz

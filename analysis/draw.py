@@ -171,8 +171,9 @@ class Draw:
         return jumps, linears, trashes, unknown, finish
 
 
-    def make_plot(self, λ, force_Y, theor_f, N_fits, discr, index, fitting_points, 
-                  N_nucleotides, f_rupture, f_rupture_next, path, save_fig, folder, number, N, ty, txt=True):
+    def make_plot(self, λ, force_Y, theor_f, N_fits, discr, index, 
+                  fitting_points, N_nucleotides, f_rupture, f_rupture_next, 
+                  path, save_fig, folder, number, N, ty, txt=True):
         fig = plt.figure()
         plt.plot(λ, force_Y, label = 'Data')
         if N_fits == 2:
@@ -186,7 +187,7 @@ class Draw:
             plt.scatter(x[ind-1], f_rupture[0], marker='D', s=40, color='black')
             plt.scatter(x[ind], f_rupture_next[0], marker='D', s=40, color='black')
 
-        plt.xlabel('$\lambda_r$')
+        plt.xlabel(r'$\lambda_r$')
         plt.ylabel('$f_Y \\: [pN]$')
         plt.legend()
         plt.title(f'{path}')

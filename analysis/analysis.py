@@ -6,6 +6,7 @@ from tqdm import tqdm
 import pandas as pd
 from .draw import Draw
 from .rip_founder import method2
+from .rip_founder_new import method2_new
 
 
 #########################################
@@ -76,6 +77,7 @@ class Txt_Reading:
         self.called_errors = False
 
         self.new_method = method2(self.λ, self.force_Y, self.time, self._compute_interesting_variables)
+        # self.new_method = method2_new(self.λ, self.force_Y, self.time, self._compute_interesting_variables)
 
         if forced_reshaped:
             try:
@@ -94,6 +96,12 @@ class Txt_Reading:
                 self.N_fits = self.new_method.N_fits
                 self.N_nucleotides = self.new_method.N_nucleotides
                 self.k_eff = self.new_method.k_eff
+                self.x_ssDNA = self.new_method.x_ssDNA
+                self.t_0 = self.new_method.t_0
+                self.fitting_points = self.new_method.fitting_points 
+                self.best_reshape = self.new_method.best_reshape
+                # print(f'{self.fitting_points = }, {self.best_reshape = }')
+                
                     
             except:
                 self._errors()
@@ -108,7 +116,8 @@ class Txt_Reading:
                                     self.f_rupture, self.f_rupture_next, self.path, save_fig=False, folder='', number=0, N=0, ty=self.ty, txt=False)                     
 
 
-        columns = ["f_rupture", "f_rupture_next", "x_ssDNA", "N_nucleotides", "t_0", "λ_0", "a_pre", "b_pre", "a_post", "b_post", "N_fits"]
+        columns = ["f_rupture", "f_rupture_next", "x_ssDNA", "N_nucleotides", "k_eff", 
+                   "t_0", "λ_0", "a_pre", "b_pre", "a_post", "b_post", "N_fits"]
         self.params_df = pd.DataFrame([self.params], columns=columns)
 
         return self.file
@@ -368,11 +377,11 @@ class Txt_Reading:
         if forced_reshaped:
             self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=forced_reshaped)
             self.N_fits = 2
-            self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.t_0 + self.λ_0 + self.popt_pre.tolist() + self.popt_post.tolist() + [self.N_fits]
+            self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + [self.k_eff] + self.t_0 + self.λ_0 + self.popt_pre.tolist() + self.popt_post.tolist() + [self.N_fits]
             x = np.concatenate((np.linspace(min(self.λ), self.λ[self.index[0]], self.index[0]), 
                                 np.linspace(self.λ[self.index[0]], max(self.λ), len(self.λ) - self.index[0])))
             
-            self.theor_f = self._heaviside_fitting(x, self.index[0], *self.params[6:-1])   
+            self.theor_f = self._heaviside_fitting(x, self.index[0], *self.params[7:-1])   
 
         else: 
             self.λ_0 = λ_reshaped[self.index].tolist()
@@ -409,10 +418,10 @@ class Txt_Reading:
                 self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=b*5)  
             # else:
             #     self.λ_0, self.index, self.f_rupture = self.change_point(forced_reshaped=1)  
-            self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.t_0 + self.λ_0 + self.popt_pre.tolist() + self.popt_post.tolist() + [self.N_fits]
+            self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + [self.k_eff] +  self.t_0 + self.λ_0 + self.popt_pre.tolist() + self.popt_post.tolist() + [self.N_fits]
             x = np.concatenate((np.linspace(min(self.λ), self.λ[self.index[0]], self.index[0]), 
                                 np.linspace(self.λ[self.index[0]], max(self.λ), len(self.λ) - self.index[0])))
-            self.theor_f = self._heaviside_fitting(x, self.index[0], *self.params[6:-1])
+            self.theor_f = self._heaviside_fitting(x, self.index[0], *self.params[7:-1])
 
             # print(self.N_nucleotides)
 
@@ -445,7 +454,7 @@ class Txt_Reading:
         
 
     def bootstrap(self, λ_reshaped, force_Y_reshaped, time_reshaped, all_indexes, index_med):
-        best_index, best_chi = 6, np.Inf
+        best_index, best_chi = 6, np.inf
         N_prev = 0
         for index in all_indexes:
             if index < 5:
@@ -512,7 +521,7 @@ class Txt_Reading:
         # the λ_0 point will be: so the point spotted here could not be the real one
         
         segments = list(range(2, 9))
-        off_chi = np.Inf
+        off_chi = np.inf
         for n_points in segments: 
             force_Y_reshaped, λ_reshaped, time_reshaped = self.reshape(n_points=n_points*5)
 
@@ -607,7 +616,7 @@ class Txt_Reading:
             for N in range(1, fold_N_max+1):
                 file_f = self.readTxt(number = m, N = N, ty = 'f', print_out=False, initial_t_time=True)
                 if self.N_fits > 0 and 0 <= self.N_nucleotides[0] < 100:
-                    m_f.append([self.params[:5]]) # saving the parameters
+                    m_f.append([self.params[:6]]) # saving the parameters
                     if self.N_fits == 1:
                         self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 1, self.discr, self.index, self.fitting_points, self.N_nucleotides, 
                                             self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder='saved/linear', number=m, 
@@ -629,7 +638,7 @@ class Txt_Reading:
             for N in range(1, unfold_N_max+1):
                 file_u = self.readTxt(number = m, N = N, ty = 'u', print_out=False, initial_t_time=True)
                 if self.N_fits > 0 and 0 <= self.N_nucleotides[0] < 100:
-                    m_u.append([self.params[:5]]) # saving the parameters 
+                    m_u.append([self.params[:6]]) # saving the parameters 
                     if self.N_fits == 1:
                         self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 1, self.discr, self.index, self.fitting_points, self.N_nucleotides,
                                             self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder='saved/linear', number=m, 
@@ -706,7 +715,7 @@ class Txt_Reading:
                 file_f = self.readTxt(number = m, N = N, ty = 'f', print_out=False, initial_t_time=True)    
                 if f'{path}{N}_f.txt' in jumps:
                     if 0 < self.N_nucleotides[0] < 100:
-                        m_f.append([self.params[:5]]) # saving the parameters
+                        m_f.append([self.params[:6] + [f'Data/{self.folder}/{self.f_MAX}/{m}/{N}_f.txt']]) # saving the parameters
                         self.draw.make_plot(self.λ, self.force_Y, self.theor_f, self.N_fits, self.discr, self.index, self.fitting_points, self.N_nucleotides,
                                             self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder=jump_dir, number=m, 
                                             N=N, ty=self.ty)
@@ -723,7 +732,7 @@ class Txt_Reading:
                 elif f'{path}{N}_f.txt' in linear:
                     self.N_fits = 1
                     self._errors()
-                    m_f.append([self.params[:5]]) # saving the parameters
+                    m_f.append([self.params[:6] + [f'Data/{self.folder}/{self.f_MAX}/{m}/{N}_f.txt']]) # saving the parameters
                     self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 1, self.discr, self.index, self.fitting_points, self.N_nucleotides,
                                         self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder=linear_dir, number=m, 
                                         N=N, ty=self.ty, txt=False)
@@ -740,7 +749,7 @@ class Txt_Reading:
                 file_u = self.readTxt(number = m, N = N, ty = 'u', print_out=False, initial_t_time=True)
                 if f'{path}{N}_u.txt' in jumps:
                     if 0 < self.N_nucleotides[0] < 100:
-                        m_u.append([self.params[:5]]) # saving the parameters 
+                        m_u.append([self.params[:6] + [f'Data/{self.folder}/{self.f_MAX}/{m}/{N}_u.txt']]) # saving the parameters 
                         self.draw.make_plot(self.λ, self.force_Y, self.theor_f, self.N_fits, self.discr, self.index, self.fitting_points, self.N_nucleotides,
                                             self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder=jump_dir, number=m, 
                                             N=N, ty=self.ty)
@@ -757,7 +766,7 @@ class Txt_Reading:
                 elif f'{path}{N}_u.txt' in linear:
                     self.N_fits = 1
                     self._errors()
-                    m_u.append([self.params[:5]]) # saving the parameters
+                    m_u.append([self.params[:6] + [f'Data/{self.folder}/{self.f_MAX}/{m}/{N}_u.txt']]) # saving the parameters
                     self.draw.make_plot(self.λ, self.force_Y, self.theor_f, 1, self.discr, self.index, self.fitting_points, self.N_nucleotides,
                                         self.f_rupture, self.f_rupture_next, self.path, save_fig=True, folder=linear_dir, number=m, 
                                         N=N, ty=self.ty, txt=False)
@@ -837,9 +846,30 @@ class Txt_Reading:
 
 
     def _save_results(self, molecules, all_molecules_f, all_molecules_u):
+        # Columns: Molecule, f, f_next, x_ssDNA, N_nucleotides, k_eff, t_0, fileName
+        self.res_fold = pd.DataFrame(columns=["Molecule", "f", "f_next", "x_ssDNA", "N_nucleotides", "k_eff", "t_0", "fileName"])
+        self.res_unfold = pd.DataFrame(columns=["Molecule", "f", "f_next", "x_ssDNA", "N_nucleotides", "k_eff", "t_0", "fileName"])
+
+        results_folder = f'res/{self.folder}'
+        if not os.path.exists(results_folder):
+            os.makedirs(results_folder) # create folder
+    
+        result_path = f'res/{self.folder}/f_max{self.f_MAX}'
+        
+        print("Saving results...") # create file
+        np.savez(result_path, 
+                 molecules=molecules,
+                 all_molecules_f=all_molecules_f,
+                 all_molecules_u=all_molecules_u)
+
+        
+
+    def _old_save_results(self, molecules, all_molecules_f, all_molecules_u):
         # Columns: Molecule, f, f_next, x_ssDNA, N_nucleotides, t_0
-        self.res_fold = pd.DataFrame(columns=["Molecule", "f", "f_next", "x_ssDNA", "N_nucleotides", "t_0"])
-        self.res_unfold = pd.DataFrame(columns=["Molecule", "f", "f_next", "x_ssDNA", "N_nucleotides", "t_0"])
+        self.res_fold = pd.DataFrame(columns=["Molecule", "f", "f_next", "x_ssDNA", "N_nucleotides", "t_0", "fileName"])
+        self.res_unfold = pd.DataFrame(columns=["Molecule", "f", "f_next", "x_ssDNA", "N_nucleotides", "t_0", "fileName"])
+        
+        # Very bad implementation...
         j = 0
         for m in range(len(molecules)):
             for i in range(len(all_molecules_f[m])):
@@ -890,11 +920,11 @@ class Txt_Reading:
 
     def _errors(self):
         self.called_errors = True
-        self.index, self.λ_0, self.f_rupture, self.f_rupture_next, self.x_ssDNA, self.N_nucleotides = [[0]]*6
+        self.index, self.λ_0, self.f_rupture, self.f_rupture_next, self.x_ssDNA, self.N_nucleotides, self.k_eff = [[0]]*7
         # t_0 now represents the initial time of the data
         self.t_0 = [min([self.time[0], self.time[-1]])]
         self.popt_pre, self.popt_post = [0, 0], [0, 0]
-        self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.t_0 + self.λ_0 + self.popt_pre + self.popt_post + [self.N_fits]
+        self.params = self.f_rupture + self.f_rupture_next + self.x_ssDNA + self.N_nucleotides + self.k_eff + self.t_0 + self.λ_0 + self.popt_pre + self.popt_post + [self.N_fits]
 
     # Inverse function of f(x) from WLC model
     def x_WLC_f(self, f):
